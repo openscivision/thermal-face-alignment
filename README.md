@@ -4,7 +4,7 @@
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/thermal-face-alignment)](https://pypistats.org/packages/thermal-face-alignment)
 
 
-# TFAN - Thermal Facial Alignment Network trained on the T-FAKE dataset
+# Thermal-facial-alignment network (TFAN) trained on the T-FAKE dataset
 
 ## Using the landmarker
 

@@ -3,7 +3,7 @@ requires = ["setuptools>=61", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tfan"
+name = "thermal-face-alignment"
 dynamic = ["version"]
 description = " implementation and weights for facial landmarks in thermal images trained with the dataset described in 'T-FAKE: Synthesizing Thermal Images for Facial Landmarking'."
 readme = "README.md"
