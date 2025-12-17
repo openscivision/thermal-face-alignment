@@ -29,7 +29,6 @@ classifiers = [
 
 dependencies = [
     "neurovc>=0.1.0a3",
-    "yolov5-face==0.0.1a1",
     "torch>=2.4.0",
     "torchvision>=0.19.0",
     "timm",

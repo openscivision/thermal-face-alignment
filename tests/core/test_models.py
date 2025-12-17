@@ -69,7 +69,9 @@ def test_thermal_landmarks_init_loads_model(monkeypatch, tmp_path):
     calls = {}
 
     monkeypatch.setattr(models, "DMMv2", DummyModel)
-    monkeypatch.setattr(models, "TFWLandmarker", DummyLandmarker)
+    monkeypatch.setattr(
+        models.ThermalLandmarks, "_landmarker_cls", DummyLandmarker, raising=False
+    )
 
     def fake_get_model(model_name):
         calls["model"] = model_name
