@@ -94,3 +94,19 @@ BibTeX entry
     pages     = {26356-26366}
 }
 ```
+
+thermal face bounding box detection uses the TFW landmarker model, please cite:
+
+> Kuzdeuov, A., Aubakirova, D., Koishigarina, D., & Varol, H. A. (2022). TFW: Annotated Thermal Faces in the Wild Dataset. *IEEE Transactions on Information Forensics and Security*, 17, 2084–2094. https://doi.org/10.1109/TIFS.2022.3177949
+
+```bibtex
+@article{9781417,
+author={Kuzdeuov, Askat and Aubakirova, Dana and Koishigarina, Darina and Varol, Huseyin Atakan},
+journal={IEEE Transactions on Information Forensics and Security},
+title={TFW: Annotated Thermal Faces in the Wild Dataset},
+year={2022},
+volume={17},
+pages={2084-2094},
+doi={10.1109/TIFS.2022.3177949}
+}
+```
