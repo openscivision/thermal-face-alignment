@@ -30,7 +30,7 @@ DEVICE = "cuda"
 
 
 class _ModelDownloader:
-    def __init__(self, model_name, save_dir="~/.neurovc/models"):
+    def __init__(self, model_name, save_dir="~/.tfan/models"):
         self.model_name = model_name
         self.save_dir = Path(os.path.expanduser(save_dir))
         self.file_id = _file_id_map.get(model_name)
