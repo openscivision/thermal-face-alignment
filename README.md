@@ -2,14 +2,36 @@
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/thermal-face-alignment)](https://pypi.org/project/thermal-face-alignment/)
 [![PyPI - License](https://img.shields.io/pypi/l/thermal-face-alignment)](LICENSE)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/thermal-face-alignment)](https://pypistats.org/packages/thermal-face-alignment)
-[![PyPI Downloads](https://static.pepy.tech/personalized-badge/thermal-face-alignment?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=all+time+downloads)](https://pepy.tech/projects/thermal-face-alignment)[![GitHub Actions](https://github.com/FlowRegSuite/thermal-face-alignment/actions/workflows/pypi-release.yml/badge.svg)](https://github.com/openscivision/thermal-face-alignment/actions/workflows/pypi-release.yml)
 
-![Image](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/7221fdc136ac84f2ce5a304b45b04bdd4bc7405b/img/fake-thermal.jpg)
 
-# T-FAKE: Synthesizing Thermal Images for Facial Landmarking
+# TFAN - Thermal Facial Alignment Network trained on the T-FAKE dataset
 
+## Using the landmarker
+
+Install and run:
+
+```bash
+pip install thermal-face-alignment
+```
+
+```python
+import cv2
+from tfan import ThermalLandmarks
+
+# Read a thermal image (grayscale)
+image = cv2.imread("thermal.png", cv2.IMREAD_GRAYSCALE)
+
+# Initialize landmarker (downloads weights on first use)
+landmarker = ThermalLandmarks(device="cpu", n_landmarks=478)
+
+landmarks, confidences = landmarker.process(image)
+```
+
+![landmarks](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/7221fdc136ac84f2ce5a304b45b04bdd4bc7405b/img/landmarks.jpg)
 
 ## Downloading the dataset
+
+![Image](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/7221fdc136ac84f2ce5a304b45b04bdd4bc7405b/img/fake-thermal.jpg)
 
 To download the color images, sparse annotations, and segmentation masks for the dataset, please use the links in the [FaceSynthetics repository](https://github.com/microsoft/FaceSynthetics).
 
@@ -19,12 +41,6 @@ Our dataset has been generated for a warm and for a cold condition. Each dataset
 - A medium sample with 1,000 images from [here warm](https://drive.google.com/file/d/1-NcsaNa6dbfmQ0l6UjmwZSJWDsUFM4vW/view?usp=sharing) and [here cold](https://drive.google.com/file/d/1-PqPR86GDj5LB_6PZKlek6o6FNbkf7Fo/view?usp=sharing)
 - The full dataset with 100,000 images from [here warm](https://drive.google.com/file/d/1-3-OC-VYL14uyLA4Vi9DpwDlkauuNh7K/view?usp=sharing) and [here cold](https://drive.google.com/file/d/1wh25Yi9sT-0j6qXz0JlHUtIIbLAYUnrZ/view?usp=sharing)
 - The dense annotations are available from [here](https://drive.google.com/file/d/1-lMYaok0xbfQyBTxj6dcuxT1iryU7TOs/view?usp=sharing)
-
-## Using the landmarker
-
-Coming soon.
-
-![landmarks](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/7221fdc136ac84f2ce5a304b45b04bdd4bc7405b/img/landmarks.jpg)
 
 ## Pre-trained models
 
