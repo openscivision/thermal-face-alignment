@@ -29,11 +29,11 @@ landmarks, confidences = landmarker.process(image)
 
 ![landmarks](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/7221fdc136ac84f2ce5a304b45b04bdd4bc7405b/img/landmarks.jpg)
 
-## Downloading the dataset
+## Training dataset
 
 ![Image](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/7221fdc136ac84f2ce5a304b45b04bdd4bc7405b/img/fake-thermal.jpg)
 
-To download the color images, sparse annotations, and segmentation masks for the dataset, please use the links in the [FaceSynthetics repository](https://github.com/microsoft/FaceSynthetics).
+We trained our landmarker on our custom-made T-FAKE dataset consisting of synthetic thermal images. To download the original color images, sparse annotations, and segmentation masks for the dataset, please use the links in the [FaceSynthetics repository](https://github.com/microsoft/FaceSynthetics).
 
 Our dataset has been generated for a warm and for a cold condition. Each dataset can be downloaded separately as
 
