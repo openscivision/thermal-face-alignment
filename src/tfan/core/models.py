@@ -18,7 +18,6 @@ from torchvision.transforms import Normalize
 import numpy as np
 
 from os.path import join
-from neurovc.thermal_landmarks import TFWLandmarker
 
 import gdown
 import os
@@ -142,7 +141,10 @@ class ThermalLandmarks:
         n_landmarks=478,
         normalize=True,
     ):
-        self.face_tracker = TFWLandmarker()
+        landmarker_cls = getattr(self, "_landmarker_cls", None)
+        if landmarker_cls is None:
+            from neurovc.thermal_landmarks import TFWLandmarker as landmarker_cls
+        self.face_tracker = landmarker_cls()
 
         dmm = DMMv2(n_landmarks=n_landmarks)
         self.n_landmarks = n_landmarks
