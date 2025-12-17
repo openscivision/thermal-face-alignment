@@ -1,4 +1,4 @@
-![Image](img/fake-thermal.jpg)
+![Image](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/7221fdc136ac84f2ce5a304b45b04bdd4bc7405b/img/fake-thermal.jpg)
 
 # T-FAKE: Synthesizing Thermal Images for Facial Landmarking
 
@@ -18,7 +18,7 @@ Our dataset has been generated for a warm and for a cold condition. Each dataset
 
 Coming soon.
 
-![landmarks](img/landmarks.jpg)
+![landmarks](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/7221fdc136ac84f2ce5a304b45b04bdd4bc7405b/img/landmarks.jpg)
 
 ## Pre-trained models
 
@@ -26,16 +26,16 @@ The models for the thermalization as well as the landmarkers can be downloaded f
 
 ### Thermalization
 
-Our baseline U-Net translation model is imported from [segmentation_models_pytorch](https://segmentation-modelspytorch.readthedocs.io/en/latest/) library. Specifically, we define the translator as follows:  
+Our baseline U-Net translation model is imported from [segmentation_models_pytorch](https://segmentation-modelspytorch.readthedocs.io/en/latest/) library. Specifically, we define the translator as follows:
 
 ```python
 import segmentation_models_pytorch as smp
 
 translator = smp.Unet(
-    encoder_name="resnet34",        
-    encoder_weights="imagenet",     
-    in_channels=3,                  
-    classes=1,                      
+    encoder_name="resnet34",
+    encoder_weights="imagenet",
+    in_channels=3,
+    classes=1,
     activation="sigmoid"
 )
 ```
@@ -48,7 +48,7 @@ Will be added soon.
 
 ## Running the benchmark
 
-To run the benchmark, you have to download the [CHARLOTTE ThermalFace dataset](https://github.com/TeCSAR-UNCC/UNCC-ThermalFace). 
+To run the benchmark, you have to download the [CHARLOTTE ThermalFace dataset](https://github.com/TeCSAR-UNCC/UNCC-ThermalFace).
 
 
 ## License
@@ -58,7 +58,7 @@ This dataset and the landmarking methods are licensed under the [Attribution-Non
 ## Citation
 
 If you use this code for your own work, please cite our paper:
-  
+
 > P. Flotho, M. Piening, A. Kukleva and G. Steidl, “T-FAKE: Synthesizing Thermal Images for Facial Landmarking,” Proceedings of the Computer Vision and Pattern Recognition Conference (CVPR), 2025. [CVF Open Access](https://openaccess.thecvf.com/content/CVPR2025/html/Flotho_T-FAKE_Synthesizing_Thermal_Images_for_Facial_Landmarking_CVPR_2025_paper.html)
 
 BibTeX entry
