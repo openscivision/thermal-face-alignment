@@ -46,36 +46,9 @@ Our dataset has been generated for a warm and for a cold condition. Each dataset
 
 The models for the thermalization as well as the landmarkers can be downloaded from [here](https://drive.google.com/drive/folders/1-ppKS4xuBY-EbmGCkvKTLYMXHA3lK8R8?usp=sharing).
 
-### Thermalization
-
-Our baseline U-Net translation model is imported from [segmentation_models_pytorch](https://segmentation-modelspytorch.readthedocs.io/en/latest/) library. Specifically, we define the translator as follows:
-
-```python
-import segmentation_models_pytorch as smp
-
-translator = smp.Unet(
-    encoder_name="resnet34",
-    encoder_weights="imagenet",
-    in_channels=3,
-    classes=1,
-    activation="sigmoid"
-)
-```
-
-This model is based on a U-Net architecture with a ResNet-34 encoder pre-trained on ImageNet. It takes three-channel RGB input images and outputs a single-channel thermal image with a sigmoid activation function. For training progress of the thermalization model see [ThermalizationCode/ThermalizerOutput.ipynb](https://github.com/phflot/tfake/blob/main/ThermalizationCode/ThermalizerOutput.ipynb).
-
-### Landmarking
-
-Will be added soon.
-
-## Running the benchmark
-
-To run the benchmark, you have to download the [CHARLOTTE ThermalFace dataset](https://github.com/TeCSAR-UNCC/UNCC-ThermalFace).
-
-
 ## License
 
-This dataset and the landmarking methods are licensed under the [Attribution-NonCommercial-ShareAlike 4.0 International](LICENSE.txt) license as it is derived from the [FaceSynthetics dataset](https://github.com/microsoft/FaceSynthetics).
+Our landmarking methods and the training dataset are licensed under the [Attribution-NonCommercial-ShareAlike 4.0 International](LICENSE.txt) license as it is derived from the [FaceSynthetics dataset](https://github.com/microsoft/FaceSynthetics).  
 
 ## Citation
 
@@ -95,18 +68,18 @@ BibTeX entry
 }
 ```
 
-thermal face bounding box detection uses the TFW landmarker model, please cite:
+Our thermal face bounding box detection uses the TFW landmarker model, so please additionally cite:
 
 > Kuzdeuov, A., Aubakirova, D., Koishigarina, D., & Varol, H. A. (2022). TFW: Annotated Thermal Faces in the Wild Dataset. *IEEE Transactions on Information Forensics and Security*, 17, 2084–2094. https://doi.org/10.1109/TIFS.2022.3177949
 
 ```bibtex
 @article{9781417,
-author={Kuzdeuov, Askat and Aubakirova, Dana and Koishigarina, Darina and Varol, Huseyin Atakan},
-journal={IEEE Transactions on Information Forensics and Security},
-title={TFW: Annotated Thermal Faces in the Wild Dataset},
-year={2022},
-volume={17},
-pages={2084-2094},
-doi={10.1109/TIFS.2022.3177949}
+    author={Kuzdeuov, Askat and Aubakirova, Dana and Koishigarina, Darina and Varol, Huseyin Atakan},
+    journal={IEEE Transactions on Information Forensics and Security},
+    title={TFW: Annotated Thermal Faces in the Wild Dataset},
+    year={2022},
+    volume={17},
+    pages={2084-2094},
+    doi={10.1109/TIFS.2022.3177949}
 }
 ```
