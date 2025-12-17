@@ -95,7 +95,7 @@ BibTeX entry
 }
 ```
 
-thermal face bounding box detection uses the TFW landmarker model, please cite:
+The thermal face bounding box detection in this repo uses the TFW landmarker model, please cite:
 
 > Kuzdeuov, A., Aubakirova, D., Koishigarina, D., & Varol, H. A. (2022). TFW: Annotated Thermal Faces in the Wild Dataset. *IEEE Transactions on Information Forensics and Security*, 17, 2084–2094. https://doi.org/10.1109/TIFS.2022.3177949
 
