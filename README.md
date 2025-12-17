@@ -1,3 +1,9 @@
+[![PyPI - Version](https://img.shields.io/pypi/v/thermal-face-alignment)](https://pypi.org/project/thermal-face-alignment/)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/thermal-face-alignment)](https://pypi.org/project/thermal-face-alignment/)
+[![PyPI - License](https://img.shields.io/pypi/l/thermal-face-alignment)](LICENSE)
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/thermal-face-alignment)](https://pypistats.org/packages/thermal-face-alignment)
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/thermal-face-alignment?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=all+time+downloads)](https://pepy.tech/projects/thermal-face-alignment)[![GitHub Actions](https://github.com/FlowRegSuite/thermal-face-alignment/actions/workflows/pypi-release.yml/badge.svg)](https://github.com/openscivision/thermal-face-alignment/actions/workflows/pypi-release.yml)
+
 ![Image](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/7221fdc136ac84f2ce5a304b45b04bdd4bc7405b/img/fake-thermal.jpg)
 
 # T-FAKE: Synthesizing Thermal Images for Facial Landmarking
