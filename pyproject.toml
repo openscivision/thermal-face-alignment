@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=61", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tfan"
+dynamic = ["version"]
+description = " implementation and weights for facial landmarks in thermal images trained with the dataset described in 'T-FAKE: Synthesizing Thermal Images for Facial Landmarking'."
+readme = "README.md"
+authors = [
+    { name = "Philipp Flotho", email = "Philipp.Flotho@uni-saarland.de" },
+    { name = "Moritz Piening", email = "piening@math.tu-berlin.de"}
+]
+license = { text = "CC BY-NC-SA 4.0" }
+requires-python = ">=3.10,<3.13"
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: Other/Proprietary License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
+dependencies = [
+    "neurovc>=0.1.0a3",
+    "yolov5-face==0.0.1a1",
+    "torch>=2.4.0",
+    "torchvision>=0.19.0",
+    "timm",
+    "requests>=2.32.0",
+    "tqdm>=4.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools_scm]
+version_file = "src/tfan/_version.py"
+version_scheme = "no-guess-dev"
+local_scheme = "no-local-version"
