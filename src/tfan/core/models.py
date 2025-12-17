@@ -20,8 +20,7 @@ import numpy as np
 from os.path import join
 from neurovc.thermal_landmarks import TFWLandmarker
 
-import requests
-from tqdm import tqdm
+import gdown
 import os
 from pathlib import Path
 
@@ -51,26 +50,11 @@ class _ModelDownloader:
         if self.model_path.exists():
             return self.model_path
 
-        print(f"Downloading {self.model_name}...")
-        response = requests.get(self.model_url, stream=True)
-        if response.status_code == 200:
-            total_size = int(response.headers.get("content-length", 0))
-            with (
-                open(self.model_path, "wb") as f,
-                tqdm(
-                    desc=f"Downloading {self.model_name}",
-                    total=total_size,
-                    unit="B",
-                    unit_scale=True,
-                    unit_divisor=1024,
-                ) as bar,
-            ):
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-                    bar.update(len(chunk))
-            print(f"Model downloaded to {self.model_path}")
-        else:
-            raise Exception(f"Failed to download model: {response.status_code}")
+        print(f"Downloading {self.model_name} with gdown...")
+        url = f"https://drive.google.com/uc?export=download&id={self.file_id}"
+        output = gdown.download(url, str(self.model_path), quiet=False)
+        if output is None or not self.model_path.exists():
+            raise RuntimeError(f"Failed to download model '{self.model_name}'")
         return self.model_path
 
 
