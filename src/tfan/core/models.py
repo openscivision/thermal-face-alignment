@@ -147,7 +147,7 @@ class ThermalLandmarks:
         dmm = DMMv2(n_landmarks=n_landmarks)
         self.n_landmarks = n_landmarks
 
-        model_path = _get_model(str(n_landmarks))
+        model_path = _get_model(str(n_landmarks)) if not model_path else model_path
         print(model_path)
         dmm.load_state_dict(torch.load(model_path, weights_only=True), strict=False)
 

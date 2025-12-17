@@ -71,11 +71,12 @@ def test_thermal_landmarks_init_loads_model(monkeypatch, tmp_path):
 
     monkeypatch.setattr(models, "DMMv2", DummyModel)
     monkeypatch.setattr(models, "TFWLandmarker", DummyLandmarker)
-    monkeypatch.setattr(
-        models,
-        "_get_model",
-        lambda model_name: calls.setdefault("model", model_name) or model_path,
-    )
+
+    def fake_get_model(model_name):
+        calls["model"] = model_name
+        return model_path
+
+    monkeypatch.setattr(models, "_get_model", fake_get_model)
 
     def fake_torch_load(path, weights_only=False):
         calls["torch_load"] = {"path": Path(path), "weights_only": weights_only}
