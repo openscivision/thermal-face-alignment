@@ -29,13 +29,106 @@ landmarks, confidences = landmarker.process(image)
 ![TFW Example Prediction](https://github.com/openscivision/thermal-face-alignment/blob/main/img/tfw-sample_tfan.png?raw=true)
 *Source: [TFW Dataset](https://github.com/IS2AI/TFW)*
 
-## Options
 
-Our landmarker supports dense (n_landmarks=478) and sparse (n_landmarks=70) landmarks.
+## Practical Usage
+
+The `ThermalLandmarks` class wraps a two-stage pipeline: a sparse face detector followed by a dense
+landmark refinement network. It supports thermal, grayscale, and RGB inputs. 
+
+Please note that we trained our network with temperature value range of 20°C to 40°C. While our implementation performs an automatic rescaling, please make sure that you adapt our landmarker options based on the input pixel values. 
+
+### Initialization options
+
+```python
+ThermalLandmarks(
+    model_path=None,
+    device="cpu",
+    gpus=[0, 1],
+    eta=0.75,
+    max_lvl=0,
+    stride=100,
+    n_landmarks=478,
+    normalize=True,
+)
+```
+
+- **`model_path`** (`str` or `Path`, optional)  
+  Path to a pretrained DMMv2 model (`state_dict`).  
+  If omitted, pretrained weights matching `n_landmarks` are downloaded automatically.
+
+- **`device`** (`"cpu"` or `"cuda"`, default `"cpu"`)  
+  Torch device used for inference. When using `"cuda"`, the model may be wrapped in `DataParallel`.
+
+- **`gpus`** (`list[int]`, default `[0, 1]`)  
+  GPU device IDs used when `device="cuda"`.
+
+- **`n_landmarks`** (`int`, default `478`)  
+  Number of facial landmarks predicted per face.  
+  Common choices:
+  - `70` — sparse landmarks
+  - `478` — dense landmarks
+
+- **`normalize`** (`bool`, default `True`)  
+  Apply ImageNet normalization to cropped face patches before inference.  
+  Assumes inputs are scaled to `[0, 255]`.
+
+- **`eta`** (`float`, default `0.75`)  
+  Pyramid scale factor used in sliding-window mode.
+
+- **`max_lvl`** (`int`, default `0`)  
+  Maximum pyramid level for multi-scale sliding-window inference.
+
+- **`stride`** (`int`, default `100`)  
+  Pixel stride used during sliding-window scanning.
+
+---
+
+### Inference options
+
+```python
+landmarks, confidences = landmarker.process(
+    image,
+    sliding_window=False,
+    multi=False,
+    mode="auto",
+)
+```
+
+- **`image`** (`numpy.ndarray`)  
+  Input frame:
+  - `H×W`: thermal or grayscale image
+  - `H×W×3`: RGB/BGR image
+
+- **`mode`** (`"auto" | "temperature" | "pixel"`, default `"auto"`)  
+  Controls how numeric values are interpreted:
+  - `"temperature"`: 2D thermal image in °C
+  - `"pixel"`: pixel intensities in `[0, 255]` or `[0, 1]`
+  - `"auto"`: inferred from dtype and value range
+
+- **`multi`** (`bool`, default `False`)  
+  If `True`, return landmarks for all detected faces.  
+  If `False`, only the first face is returned.
+
+- **`sliding_window`** (`bool`, default `False`)  
+  Enable multi-scale sliding-window inference.  
+  **Note:** currently only supported when `multi=False`.
+
+---
+
+### Outputs
+
+- **`landmarks`**  
+  Pixel coordinates in the original image:
+  - List of `(n_landmarks, 2)` arrays (multi-face)
+  - Single `(n_landmarks, 2)` array (sliding window)
+
+- **`confidences`**  
+  Per-landmark confidence scores of shape `(n_landmarks,)`
+
 
 # Background
 
-This landmarker is an implementation of our work presented in our [CVPR paper]([https://<paper-url>](https://openaccess.thecvf.com/content/CVPR2025/papers/Flotho_T-FAKE_Synthesizing_Thermal_Images_for_Facial_Landmarking_CVPR_2025_paper.pdf)) on thermal landmarking ([Main GitHub](https://github.com/phflot/tfake)).
+This landmarker is an implementation of our work presented in our [CVPR paper]([https://<paper-url>](https://openaccess.thecvf.com/content/CVPR2025/papers/Flotho_T-FAKE_Synthesizing_Thermal_Images_for_Facial_Landmarking_CVPR_2025_paper.pdf)) on thermal landmarking ([Main GitHub](https://github.com/phflot/tfake)). We employed the [TFW face detector](https://github.com/IS2AI/TFW) for our inital face detection as it performed very well in our benchmark. Please note that this library is meant for research purposes only.
 
 ## Landmarker Performance on our Charlotte Benchmark
 ![landmarks](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/7221fdc136ac84f2ce5a304b45b04bdd4bc7405b/img/landmarks.jpg)
