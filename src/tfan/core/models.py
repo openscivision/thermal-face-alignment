@@ -123,6 +123,55 @@ class DMMv2(nn.Module):
 
 
 class ThermalLandmarks:
+    """
+    Dense face landmark refinement for thermal (and optionally intensity/RGB) inputs.
+
+    This class wraps a two-stage pipeline:
+      1) A sparse face detector/tracker (`TFWLandmarker`) produces a face box (and/or sparse landmarks).
+      2) A lightweight regression network (`DMMv2`, MobileNetV2 backbone) refines to `n_landmarks`
+         dense 2D landmarks plus a per-landmark confidence.
+
+    The network operates on 224×224 RGB-like crops. For thermal inputs, a single-channel frame is
+    converted into a 3-channel image by clipping to a temperature window and rescaling.
+
+    Parameters
+    ----------
+    model_path : str or pathlib.Path, optional
+        Path to a saved `state_dict` for `DMMv2`. If omitted, weights are downloaded (via gdown)
+        for the requested `n_landmarks` and converted to a plain state_dict.
+    device : {"cpu", "cuda"}, default "cpu"
+        Torch device string. If "cuda", the model may be wrapped with `nn.DataParallel`.
+    gpus : list[int], default [0, 1]
+        GPU device ids passed to `nn.DataParallel` when `device="cuda"`.
+    eta : float, default 0.75
+        Pyramid scale factor used by the optional sliding-window mode.
+    max_lvl : int, default 0
+        Maximum pyramid level (used when `sliding_window=True`).
+    stride : int, default 100
+        Stride (pixels) for the sliding-window scan when enabled.
+    n_landmarks : int, default 478
+        Number of landmarks predicted per face.
+    normalize : bool, default True
+        If True, apply ImageNet normalization to crops before inference. By default, the
+        normalization assumes crops are in the 0–255 range (internally divided by 255).
+        If you standardize inputs to 0–1 earlier, adjust the normalization accordingly.
+
+    Attributes
+    ----------
+    face_tracker : object
+        Instance of the sparse detector/tracker (defaults to `TFWLandmarker`).
+    dmm : torch.nn.Module
+        Landmark refinement network (`DMMv2`), possibly wrapped in `nn.DataParallel`.
+    last_sparse_lm : object
+        Cached sparse detection output from the most recent detector run.
+
+    Notes
+    -----
+    * `process()` accepts 2D (thermal/intensity) or 3D (color) numpy arrays.
+    * For 3D inputs, the current implementation relies on `last_sparse_lm` already being populated
+      (i.e., the detector is not rerun on the 3-channel image).
+    """
+
     def __init__(
         self,
         model_path=None,
@@ -166,20 +215,140 @@ class ThermalLandmarks:
         else:
             self.transform = lambda x: x
 
-    def process(self, image, multi=True, sliding_window=False):
-        if self.img_shape is None:
-            img_shape = image.shape[:2]
-            wp = _warping_depth(self.eta, 100, *img_shape)
+    def process(self, image, sliding_window=False, multi=False, mode="auto"):
+        """
+        Detect faces (sparse) and predict dense landmarks (refined) for an input frame.
 
-        if len(image.shape) == 2:
-            image = image.astype(float)
-            self.last_sparse_lm = self.face_tracker.detect(image)
-            image = np.clip(image, 20, 40)
-            image -= image.min()
-            image /= image.max()
-            image = np.stack([image, image, image], 2) * 255
-        else:
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        This method updates `self.last_sparse_lm` when the sparse detector is run (typically for 2D
+        thermal/intensity inputs), then refines landmarks by cropping a square face patch and running
+        the DMMv2 network.
+
+        Parameters
+        ----------
+        image : numpy.ndarray
+            Input frame as either:
+              - H×W (2D): thermal temperatures or grayscale intensities.
+              - H×W×3 (3D): color image (assumed OpenCV BGR unless your upstream is RGB).
+            Supported value conventions depend on `mode`:
+              - temperatures in °C (thermal),
+              - pixel intensities in [0, 255],
+              - pixel intensities in [0, 1].
+        multi : bool, default False
+            If True, return results for all detected faces. If False, return only the first face
+            (current behavior still returns single-element lists).
+        sliding_window : bool, default False
+            If True, run a multi-scale sliding-window search to find the best-scoring crop.
+            This path returns a single landmark set (no multi-face support).
+        mode : {"auto", "temperature", "pixel"}, default "auto"
+            How to interpret the numeric range of `image`.
+
+            - "temperature":
+                Interpret a 2D input as temperatures in °C. The detector runs on the original 2D frame.
+                For the CNN crop, values are clipped to a face-relevant window (e.g. 20–40 °C),
+                linearly rescaled, replicated to 3 channels, and mapped to an RGB-like 0–255 image.
+            - "pixel":
+                Interpret input as pixel intensities. Float inputs in [0, 1] are mapped to [0, 255],
+                everything else is clipped to [0, 255].
+            - "auto":
+                Infer from dtype/shape and robust statistics
+
+        Returns
+        -------
+        landmarks : list[numpy.ndarray] or tuple[numpy.ndarray, numpy.ndarray]
+            If `sliding_window=False`:
+                A list of per-face landmark arrays, each of shape (n_landmarks, 2), in pixel coordinates
+                of the original input image.
+            If `sliding_window=True`:
+                (lm, scores) where `lm` has shape (n_landmarks, 2).
+        confidences : list[numpy.ndarray] or numpy.ndarray
+            If `sliding_window=False`:
+                A list of per-face confidence vectors, each of shape (n_landmarks,).
+            If `sliding_window=True`:
+                `scores` is a confidence vector of shape (n_landmarks,).
+
+        Raises
+        ------
+        ValueError
+            If the requested mode is incompatible with the input shape (e.g. "temperature" with 3D input),
+            or if inference cannot proceed (e.g. missing cached detections for 3D inputs).
+        """
+        if mode not in {"auto", "temperature", "pixel"}:
+            raise ValueError(
+                f"mode must be one of {{'auto','temperature','pixel'}}, got {mode!r}"
+            )
+
+        img = np.asarray(image)
+
+        def _robust_p1_p99(a, max_samples=200_000):
+            flat = np.asarray(a).reshape(-1)
+            if flat.size > max_samples:
+                step = max(1, flat.size // max_samples)
+                flat = flat[::step]
+            p1, p99 = np.nanpercentile(flat, [1, 99])
+            return float(p1), float(p99)
+
+        def _to_0_255(a):
+            a = np.asarray(a)
+            if np.issubdtype(a.dtype, np.integer):
+                return np.clip(a, 0, 255).astype(np.float32)
+            a = a.astype(np.float32)
+            p1, p99 = _robust_p1_p99(a)
+            if (p99 <= 1.0 + 1e-6) and (p1 >= -1e-6):
+                return np.clip(a, 0.0, 1.0) * 255.0
+            return np.clip(a, 0.0, 255.0)
+
+        if img.ndim == 3 and img.shape[2] == 3:
+            import warnings
+
+            warnings.warn(
+                "process(): got a 3-channel image; interpreting it as thermal by averaging channels "
+                "(this is a temporary behavior).",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            img = img.astype(np.float32).mean(axis=2)
+
+        if mode == "auto":
+            if img.ndim == 2:
+                if np.issubdtype(img.dtype, np.integer):
+                    mode = "pixel"
+                else:
+                    p1, p99 = _robust_p1_p99(img)
+                    if (p99 <= 1.0 + 1e-6) and (p1 >= -1e-6):
+                        mode = "pixel"
+                    elif (p99 > 1.0 + 1e-6) and (p99 <= 80.0) and (p1 >= -10.0):
+                        mode = "temperature"
+                    else:
+                        mode = "pixel"
+            else:
+                raise ValueError(
+                    f"Expected 2D thermal frame after preprocessing, got shape {img.shape!r}"
+                )
+
+        if img.ndim != 2:
+            raise ValueError(
+                f"Expected 2D thermal frame after preprocessing, got shape {img.shape!r}"
+            )
+
+        img2d = img.astype(np.float32)
+
+        # sparse detector runs on the 2D frame (temperature or intensity)
+        self.last_sparse_lm = self.face_tracker.detect(img2d)
+
+        if mode == "temperature":
+            x = np.clip(img2d, 20.0, 40.0)
+            denom = x.max() - x.min()
+            if denom < 1e-6:
+                x = np.zeros_like(x, dtype=np.float32)
+            else:
+                x = (x - x.min()) / denom
+            image = np.repeat((x * 255.0)[..., None], 3, axis=2).astype(np.float32)
+        else:  # "pixel"
+            x = _to_0_255(img2d)
+            image = np.repeat(x[..., None], 3, axis=2).astype(np.float32)
+
+        img_shape = img2d.shape[:2]
+        wp = _warping_depth(self.eta, 100, *img_shape)
 
         if not sliding_window:
             if multi:

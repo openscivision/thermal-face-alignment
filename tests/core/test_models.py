@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import numpy as np
+import pytest
+
 from tfan.core import models
 
 
@@ -94,3 +97,157 @@ def test_thermal_landmarks_init_loads_model(monkeypatch, tmp_path):
     assert tl.dmm.loaded == ({"state": "ok"}, False)
     assert tl.device == "cpu"
     assert tl.n_landmarks == 478
+
+
+def _make_process_only_landmarker(monkeypatch):
+    tl = models.ThermalLandmarks.__new__(models.ThermalLandmarks)
+    tl.img_shape = None
+    tl.eta = 0.75
+    tl.max_lvl = 0
+    tl.stride = 100
+    tl.last_sparse_lm = None
+
+    class DummyTracker:
+        def __init__(self):
+            self.last_input = None
+
+        def detect(self, img2d):
+            self.last_input = img2d
+            return [{"landmarks": [], "box": []}]
+
+    tracker = DummyTracker()
+    tl.face_tracker = tracker
+
+    captured = {}
+
+    def capture(img3d):
+        captured["img3d"] = img3d
+        return "lm", "conf"
+
+    monkeypatch.setattr(tl, "get_landmarks_multi", capture)
+    monkeypatch.setattr(tl, "get_landmarks_single", capture)
+    return tl, tracker, captured
+
+
+def test_process_rejects_invalid_mode(monkeypatch):
+    tl, _tracker, _captured = _make_process_only_landmarker(monkeypatch)
+    with pytest.raises(ValueError, match="mode must be one of"):
+        tl.process(np.zeros((2, 2), dtype=np.float32), mode="rgb")
+
+
+def test_process_auto_integer_chooses_pixel(monkeypatch):
+    tl, tracker, captured = _make_process_only_landmarker(monkeypatch)
+    img = np.array([[0, 10], [255, 300]], dtype=np.uint16)
+
+    tl.process(img, mode="auto", multi=True)
+
+    assert tracker.last_input is not None
+    assert tracker.last_input.dtype == np.float32
+    assert tracker.last_input.shape == img.shape
+    assert np.array_equal(tracker.last_input, img.astype(np.float32))
+
+    out = captured["img3d"]
+    expected2d = np.clip(img.astype(np.float32), 0.0, 255.0)
+    expected3d = np.repeat(expected2d[..., None], 3, axis=2).astype(np.float32)
+    assert out.shape == expected3d.shape
+    assert out.dtype == np.float32
+    assert np.array_equal(out, expected3d)
+
+
+def test_process_auto_float_0_1_chooses_pixel(monkeypatch):
+    tl, tracker, captured = _make_process_only_landmarker(monkeypatch)
+    img = np.array([[0.0, 0.5], [1.0, 0.25]], dtype=np.float32)
+
+    tl.process(img, mode="auto", multi=True)
+
+    assert tracker.last_input is not None
+    assert np.array_equal(tracker.last_input, img.astype(np.float32))
+
+    out = captured["img3d"]
+    expected2d = np.clip(img, 0.0, 1.0) * 255.0
+    expected3d = np.repeat(expected2d[..., None], 3, axis=2).astype(np.float32)
+    assert np.allclose(out, expected3d, atol=1e-5)
+
+
+def test_process_auto_temperature_range_chooses_temperature(monkeypatch):
+    tl, tracker, captured = _make_process_only_landmarker(monkeypatch)
+    img = np.array([[20.0, 30.0], [40.0, 25.0]], dtype=np.float32)
+
+    tl.process(img, mode="auto", multi=True)
+
+    assert tracker.last_input is not None
+    assert np.array_equal(tracker.last_input, img.astype(np.float32))
+
+    out = captured["img3d"]
+    expected2d = (img - 20.0) / (40.0 - 20.0) * 255.0
+    expected3d = np.repeat(expected2d[..., None], 3, axis=2).astype(np.float32)
+    assert np.allclose(out, expected3d, atol=1e-5)
+
+
+def test_process_auto_float_high_range_chooses_pixel(monkeypatch):
+    tl, tracker, captured = _make_process_only_landmarker(monkeypatch)
+    img = np.array([[0.0, 100.0], [200.0, 255.0]], dtype=np.float32)
+
+    tl.process(img, mode="auto", multi=True)
+
+    assert tracker.last_input is not None
+    assert np.array_equal(tracker.last_input, img.astype(np.float32))
+
+    out = captured["img3d"]
+    expected2d = np.clip(img, 0.0, 255.0)
+    expected3d = np.repeat(expected2d[..., None], 3, axis=2).astype(np.float32)
+    assert np.array_equal(out, expected3d)
+
+
+def test_process_rgb_warns_and_is_averaged(monkeypatch):
+    tl, tracker, captured = _make_process_only_landmarker(monkeypatch)
+    temp = np.array([[20.0, 30.0], [40.0, 25.0]], dtype=np.float32)
+    rgb = np.stack([temp, temp, temp], axis=2)
+
+    with pytest.warns(RuntimeWarning, match="got a 3-channel image"):
+        tl.process(rgb, mode="auto", multi=True)
+
+    assert tracker.last_input is not None
+    assert tracker.last_input.ndim == 2
+    assert np.allclose(tracker.last_input, temp, atol=1e-6)
+
+    out = captured["img3d"]
+    expected2d = (temp - 20.0) / (40.0 - 20.0) * 255.0
+    expected3d = np.repeat(expected2d[..., None], 3, axis=2).astype(np.float32)
+    assert np.allclose(out, expected3d, atol=1e-5)
+
+
+def test_process_rejects_non_2d_frame(monkeypatch):
+    tl, _tracker, _captured = _make_process_only_landmarker(monkeypatch)
+    bad = np.zeros((2, 2, 4), dtype=np.uint8)
+    with pytest.raises(ValueError, match="Expected 2D thermal frame"):
+        tl.process(bad, mode="auto", multi=True)
+
+
+def test_process_temperature_mode_constant_frame(monkeypatch):
+    tl, tracker, captured = _make_process_only_landmarker(monkeypatch)
+    img = np.full((2, 2), 30.0, dtype=np.float32)
+
+    tl.process(img, mode="temperature", multi=True)
+
+    assert tracker.last_input is not None
+    assert np.array_equal(tracker.last_input, img.astype(np.float32))
+
+    out = captured["img3d"]
+    assert out.shape == (2, 2, 3)
+    assert out.dtype == np.float32
+    assert np.array_equal(out, np.zeros((2, 2, 3), dtype=np.float32))
+
+
+def test_process_pixel_mode_does_not_temperature_normalize(monkeypatch):
+    tl, tracker, captured = _make_process_only_landmarker(monkeypatch)
+    img = np.array([[20.0, 30.0], [40.0, 25.0]], dtype=np.float32)
+
+    tl.process(img, mode="pixel", multi=True)
+
+    assert tracker.last_input is not None
+    assert np.array_equal(tracker.last_input, img.astype(np.float32))
+
+    out = captured["img3d"]
+    expected3d = np.repeat(img[..., None], 3, axis=2).astype(np.float32)
+    assert np.array_equal(out, expected3d)
