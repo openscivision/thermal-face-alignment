@@ -64,7 +64,7 @@ ThermalLandmarks(
 
 - **`n_landmarks`** (`int`, default `478`)  
   Number of facial landmarks predicted per face.  
-  Common choices:
+  Choices:
   - `70` — sparse landmarks
   - `478` — dense landmarks
 
