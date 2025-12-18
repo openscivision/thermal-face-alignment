@@ -27,7 +27,7 @@ landmarker = ThermalLandmarks(device="cpu", n_landmarks=70)
 landmarks, confidences = landmarker.process(image)
 ```
 ![TFW Example Prediction](https://github.com/openscivision/thermal-face-alignment/blob/main/img/tfw-sample_tfan.png?raw=true)
-*Source: [TFW Dataset](https://github.com/IS2AI/TFW)*
+*Example prediction, Source: [TFW Dataset](https://github.com/IS2AI/TFW)*
 
 
 ## Practical Usage
