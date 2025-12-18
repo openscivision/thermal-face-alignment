@@ -1,12 +1,5 @@
 # ------------------------------------------------------------------------------------
-# AUTHOR STATEMENT
-#
 # Author: Philipp Flotho (philipp.flotho[at]uni-saarland.de)
-#
-# For citation, please refer to the project README.
-# If you believe any confidential or proprietary content is included, please notify me.
-#
-# Copyright (c) 2025, Philipp Flotho
 # ------------------------------------------------------------------------------------
 
 import timm
@@ -173,7 +166,7 @@ class ThermalLandmarks:
         else:
             self.transform = lambda x: x
 
-    def process(self, image, sliding_window=False, multi=False):
+    def process(self, image, multi=True, sliding_window=False):
         if self.img_shape is None:
             img_shape = image.shape[:2]
             wp = _warping_depth(self.eta, 100, *img_shape)
@@ -284,7 +277,7 @@ class ThermalLandmarks:
             return lm_scaled, np.zeros(lm_scaled.shape[0])
         lm_scaled, confidences = self._refine_landmarks(img, bbox)
 
-        return lm_scaled, confidences
+        return [lm_scaled], [confidences]
 
     def get_landmarks_multi(self, img):
         results = self.last_sparse_lm
