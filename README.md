@@ -65,8 +65,8 @@ ThermalLandmarks(
 - **`n_landmarks`** (`int`, default `478`)  
   Number of facial landmarks predicted per face.  
   Choices:
-  - `70` — sparse landmarks
-  - `478` — dense landmarks
+  - `70` — sparse landmarks following the Face Synthetic convention of (Wood et al., 2021).
+  - `478` — dense landmarks following the [MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker?hl=de) face mesh convention.
 
 - **`normalize`** (`bool`, default `True`)  
   Apply ImageNet normalization to cropped face patches before inference.  
