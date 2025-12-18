@@ -32,8 +32,7 @@ landmarks, confidences = landmarker.process(image)
 
 ## Practical Usage
 
-The `ThermalLandmarks` class wraps a two-stage pipeline: a sparse face detector followed by a dense
-landmark refinement network. It supports thermal, grayscale, and RGB inputs. 
+The ThermalLandmarks wraps a landmarker trained on T-FAKE either with sliding window selecting the face with highest confidence or via a bbox computed with a smaller model.
 
 Please note that we trained our network with temperature value range of 20°C to 40°C. While our implementation performs an automatic rescaling, please make sure that you adapt our landmarker options based on the input pixel values. 
 
