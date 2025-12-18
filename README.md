@@ -46,7 +46,7 @@ ThermalLandmarks(
     eta=0.75,
     max_lvl=0,
     stride=100,
-    n_landmarks=478,
+    n_landmarks=478, # 478 or 70 point landmarks are supported
     normalize=True,
 )
 ```
