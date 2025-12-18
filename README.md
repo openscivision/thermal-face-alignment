@@ -26,10 +26,12 @@ landmarker = ThermalLandmarks(device="cpu", n_landmarks=478)
 
 landmarks, confidences = landmarker.process(image)
 ```
+![TFW Example Prediction](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/7221fdc136ac84f2ce5a304b45b04bdd4bc7405b/img/tfw-sample_tfan.png)
 
+## Landmarker Performance on our Charlotte Benchmark
 ![landmarks](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/7221fdc136ac84f2ce5a304b45b04bdd4bc7405b/img/landmarks.jpg)
 
-## Training dataset
+## Training Dataset
 
 ![Image](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/7221fdc136ac84f2ce5a304b45b04bdd4bc7405b/img/fake-thermal.jpg)
 
