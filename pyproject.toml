@@ -15,7 +15,7 @@ license = { text = "CC BY-NC-SA 4.0" }
 requires-python = ">=3.10,<3.13"
 
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
     "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
@@ -24,14 +24,16 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Video",
     "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Image Recognition",
 ]
 
 dependencies = [
-    "neurovc[landmark]>=0.1.1a2",
+    "neurovc[landmark]>=0.1.1",
     "torch>=2.4.0",
     "torchvision>=0.19.0",
-    "timm",
+    "timm>=1.0.0",
     "gdown>=5.2.0",
     "requests>=2.32.0",
     "tqdm>=4.0.0",
