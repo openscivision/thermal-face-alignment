@@ -26,15 +26,19 @@ landmarker = ThermalLandmarks(device="cpu", n_landmarks=70)
 
 landmarks, confidences = landmarker.process(image)
 ```
-![TFW Example Prediction](https://github.com/openscivision/thermal-face-alignment/blob/main/img/tfw-sample_tfan.png?raw=true)
-*Example prediction, Source: [TFW Dataset](https://github.com/IS2AI/TFW)*
+![TFW Example Prediction](img/tfw-sample_tfan.png?raw=true)
+*Predicted 70 and 478 point landmarks on an example from the [TFW Dataset](https://github.com/IS2AI/TFW)*
 
+
+<p>
+  <video src="img/tiv_lm70_478_example.mp4" width="100%" controls></video>
+</p>
 
 ## Practical Usage
 
 The ThermalLandmarks wraps a landmarker trained on T-FAKE either with sliding window selecting the face with highest confidence or via a bbox computed with a smaller model.
 
-Please note that we trained our network with temperature value range of 20°C to 40°C. While our implementation performs an automatic rescaling, please make sure that you adapt our landmarker options based on the input pixel values. 
+Please note that we trained our network with temperature value range of 20°C to 40°C. While our implementation performs an automatic rescaling, please make sure that you adapt our landmarker options based on the input pixel values.
 
 ### Initialization options
 
@@ -51,33 +55,33 @@ ThermalLandmarks(
 )
 ```
 
-- **`model_path`** (`str` or `Path`, optional)  
-  Path to a pretrained DMMv2 model (`state_dict`).  
+- **`model_path`** (`str` or `Path`, optional)
+  Path to a pretrained DMMv2 model (`state_dict`).
   If omitted, pretrained weights matching `n_landmarks` are downloaded automatically.
 
-- **`device`** (`"cpu"` or `"cuda"`, default `"cpu"`)  
+- **`device`** (`"cpu"` or `"cuda"`, default `"cpu"`)
   Torch device used for inference. When using `"cuda"`, the model may be wrapped in `DataParallel`.
 
-- **`gpus`** (`list[int]`, default `[0, 1]`)  
+- **`gpus`** (`list[int]`, default `[0, 1]`)
   GPU device IDs used when `device="cuda"`.
 
-- **`n_landmarks`** (`int`, default `478`)  
-  Number of facial landmarks predicted per face.  
+- **`n_landmarks`** (`int`, default `478`)
+  Number of facial landmarks predicted per face.
   Choices:
   - `70` — sparse landmarks following the Face Synthetic convention of (Wood et al., 2021).
   - `478` — dense landmarks following the [MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker?hl=de) face mesh convention.
 
-- **`normalize`** (`bool`, default `True`)  
-  Apply ImageNet normalization to cropped face patches before inference.  
+- **`normalize`** (`bool`, default `True`)
+  Apply ImageNet normalization to cropped face patches before inference.
   Assumes inputs are scaled to `[0, 255]`.
 
-- **`eta`** (`float`, default `0.75`)  
+- **`eta`** (`float`, default `0.75`)
   Pyramid scale factor used in sliding-window mode.
 
-- **`max_lvl`** (`int`, default `0`)  
+- **`max_lvl`** (`int`, default `0`)
   Maximum pyramid level for multi-scale sliding-window inference.
 
-- **`stride`** (`int`, default `100`)  
+- **`stride`** (`int`, default `100`)
   Pixel stride used during sliding-window scanning.
 
 ---
@@ -93,35 +97,35 @@ landmarks, confidences = landmarker.process(
 )
 ```
 
-- **`image`** (`numpy.ndarray`)  
+- **`image`** (`numpy.ndarray`)
   Input frame:
   - `H×W`: thermal or grayscale image
   - `H×W×3`: RGB/BGR image
 
-- **`mode`** (`"auto" | "temperature" | "pixel"`, default `"auto"`)  
+- **`mode`** (`"auto" | "temperature" | "pixel"`, default `"auto"`)
   Controls how numeric values are interpreted:
   - `"temperature"`: 2D thermal image in °C
   - `"pixel"`: pixel intensities in `[0, 255]` or `[0, 1]`
   - `"auto"`: inferred from dtype and value range
 
-- **`multi`** (`bool`, default `False`)  
-  If `True`, return landmarks for all detected faces.  
+- **`multi`** (`bool`, default `False`)
+  If `True`, return landmarks for all detected faces.
   If `False`, only the first face is returned.
 
-- **`sliding_window`** (`bool`, default `False`)  
-  Enable multi-scale sliding-window inference.  
+- **`sliding_window`** (`bool`, default `False`)
+  Enable multi-scale sliding-window inference.
   **Note:** currently only supported when `multi=False`.
 
 ---
 
 ### Outputs
 
-- **`landmarks`**  
+- **`landmarks`**
   Pixel coordinates in the original image:
   - List of `(n_landmarks, 2)` arrays (multi-face)
   - Single `(n_landmarks, 2)` array (sliding window)
 
-- **`confidences`**  
+- **`confidences`**
   Per-landmark confidence scores of shape `(n_landmarks,)`
 
 
