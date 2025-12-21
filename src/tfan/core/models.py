@@ -186,7 +186,7 @@ class ThermalLandmarks:
         landmarker_cls = getattr(self, "_landmarker_cls", None)
         if landmarker_cls is None:
             from neurovc.thermal_landmarks import TFWLandmarker as landmarker_cls
-        self.face_tracker = landmarker_cls()
+        self.face_tracker = landmarker_cls(device=device)
 
         dmm = DMMv2(n_landmarks=n_landmarks)
         self.n_landmarks = n_landmarks
