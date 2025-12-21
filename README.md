@@ -27,10 +27,12 @@ landmarker = ThermalLandmarks(device="cpu", n_landmarks=70)
 landmarks, confidences = landmarker.process(image)
 ```
 ![TFW Example Prediction](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/e052eebeb04176177e919360a7fe8b3e65a7d85b/img/tfw-sample_tfan.png)
-*Predicted 70 and 478 point landmarks on an example from the [TFW Dataset](https://github.com/IS2AI/TFW)*
+*Predicted 70 and 478 point landmarks on an example from the [TFW Dataset](https://github.com/IS2AI/TFW).*
 
 
 ![Landmarking example](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/e052eebeb04176177e919360a7fe8b3e65a7d85b/img/tiv_lm70_478_example.gif)
+*Predicted 70 and 478 point landmarks on an example from the [BU-TIV Benchmark](https://csr.bu.edu/BU-TIV/BUTIV.html).*
+
 
 ## Practical Usage
 
