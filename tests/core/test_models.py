@@ -59,7 +59,8 @@ def test_thermal_landmarks_init_loads_model(monkeypatch, tmp_path):
             return self
 
     class DummyLandmarker:
-        def __init__(self):
+        def __init__(self, device=None):
+            self.device = device
             self.detect_called = False
 
         def detect(self, _img):
