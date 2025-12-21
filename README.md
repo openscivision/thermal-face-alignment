@@ -30,9 +30,7 @@ landmarks, confidences = landmarker.process(image)
 *Predicted 70 and 478 point landmarks on an example from the [TFW Dataset](https://github.com/IS2AI/TFW)*
 
 
-<p>
-  <video src="img/tiv_lm70_478_example.mp4" width="100%" controls></video>
-</p>
+![Landmarking example](img/tiv_lm70_478_example.gif?raw=true)
 
 ## Practical Usage
 
