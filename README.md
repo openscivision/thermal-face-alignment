@@ -2,6 +2,7 @@
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/thermal-face-alignment)](https://pypi.org/project/thermal-face-alignment/)
 [![PyPI - License](https://img.shields.io/pypi/l/thermal-face-alignment)](LICENSE)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/thermal-face-alignment)](https://pypistats.org/packages/thermal-face-alignment)
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/thermal-face-alignment?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=all+time+downloads)](https://pepy.tech/projects/thermal-face-alignment)
 
 
 # Thermal-facial-alignment network (TFAN) trained on the T-FAKE dataset
