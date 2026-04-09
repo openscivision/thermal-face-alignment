@@ -14,3 +14,4 @@ checkpoints/
 datasets/
 
 *.egg-info
+_version.py

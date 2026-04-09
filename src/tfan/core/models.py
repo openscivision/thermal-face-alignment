@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import cv2
 from torchvision.transforms import Normalize
+import warnings
 
 import numpy as np
 
@@ -129,7 +130,7 @@ class ThermalLandmarks:
     This class wraps a two-stage pipeline:
       1) A sparse face detector/tracker (`TFWLandmarker`) produces a face box (and/or sparse landmarks).
       2) A lightweight regression network (`DMMv2`, MobileNetV2 backbone) refines to `n_landmarks`
-         dense 2D landmarks plus a per-landmark confidence.
+         dense 2D landmarks plus a per-landmark uncertainty.
 
     The network operates on 224×224 RGB-like crops. For thermal inputs, a single-channel frame is
     converted into a 3-channel image by clipping to a temperature window and rescaling.
@@ -160,6 +161,7 @@ class ThermalLandmarks:
     ----------
     face_tracker : object
         Instance of the sparse detector/tracker (defaults to `TFWLandmarker`).
+        Created eagerly when available and lazily retried on demand otherwise.
     dmm : torch.nn.Module
         Landmark refinement network (`DMMv2`), possibly wrapped in `nn.DataParallel`.
     last_sparse_lm : object
@@ -183,13 +185,13 @@ class ThermalLandmarks:
         n_landmarks=478,
         normalize=True,
     ):
-        landmarker_cls = getattr(self, "_landmarker_cls", None)
-        if landmarker_cls is None:
-            from neurovc.thermal_landmarks import TFWLandmarker as landmarker_cls
-        self.face_tracker = landmarker_cls(device=device)
+        self.device = device
+        self.n_landmarks = n_landmarks
+        self.face_tracker = None
+        self._tracker_init_error = None
+        self._ensure_face_tracker(raise_on_error=False)
 
         dmm = DMMv2(n_landmarks=n_landmarks)
-        self.n_landmarks = n_landmarks
 
         model_path = _get_model(str(n_landmarks)) if not model_path else model_path
         print(model_path)
@@ -199,7 +201,6 @@ class ThermalLandmarks:
             dmm = nn.DataParallel(dmm, device_ids=gpus)
         dmm.eval()
         dmm.to(device)
-        self.device = device
         self.dmm = dmm
         self.img_shape = None
         self.eta = eta
@@ -214,6 +215,29 @@ class ThermalLandmarks:
             self.transform = lambda x: tmp(x / 255.0)
         else:
             self.transform = lambda x: x
+
+    def _ensure_face_tracker(self, raise_on_error=True):
+        tracker = getattr(self, "face_tracker", None)
+        if tracker is not None:
+            return tracker
+
+        landmarker_cls = getattr(self, "_landmarker_cls", None)
+        try:
+            if landmarker_cls is None:
+                from neurovc.thermal_landmarks import TFWLandmarker as landmarker_cls
+            tracker = landmarker_cls(device=self.device)
+        except Exception as exc:
+            self._tracker_init_error = exc
+            if raise_on_error:
+                raise RuntimeError(
+                    "Tracker-backed inference requires TFWLandmarker; "
+                    "use process(..., sliding_window=True) for the tracker-free path."
+                ) from exc
+            return None
+
+        self.face_tracker = tracker
+        self._tracker_init_error = None
+        return tracker
 
     def process(self, image, sliding_window=False, multi=False, mode="auto"):
         """
@@ -237,8 +261,9 @@ class ThermalLandmarks:
             If True, return results for all detected faces. If False, return only the first face
             (current behavior still returns single-element lists).
         sliding_window : bool, default False
-            If True, run a multi-scale sliding-window search to find the best-scoring crop.
-            This path returns a single landmark set (no multi-face support).
+            If True, run a multi-scale sliding-window search to find the lowest-uncertainty crop.
+            This path does not run the YOLO/TFW face tracker.
+            With `multi=True`, overlapping candidates are merged via NMS.
         mode : {"auto", "temperature", "pixel"}, default "auto"
             How to interpret the numeric range of `image`.
 
@@ -259,12 +284,14 @@ class ThermalLandmarks:
                 A list of per-face landmark arrays, each of shape (n_landmarks, 2), in pixel coordinates
                 of the original input image.
             If `sliding_window=True`:
-                (lm, scores) where `lm` has shape (n_landmarks, 2).
+                If `multi=False`, `(lm, scores)` where `lm` has shape (n_landmarks, 2).
+                If `multi=True`, a list of per-face landmark arrays.
         confidences : list[numpy.ndarray] or numpy.ndarray
             If `sliding_window=False`:
                 A list of per-face confidence vectors, each of shape (n_landmarks,).
             If `sliding_window=True`:
-                `scores` is a confidence vector of shape (n_landmarks,).
+                If `multi=False`, `scores` is an uncertainty vector of shape (n_landmarks,).
+                If `multi=True`, a list of per-face uncertainty vectors.
 
         Raises
         ------
@@ -298,8 +325,6 @@ class ThermalLandmarks:
             return np.clip(a, 0.0, 255.0)
 
         if img.ndim == 3 and img.shape[2] == 3:
-            import warnings
-
             warnings.warn(
                 "process(): got a 3-channel image; interpreting it as thermal by averaging channels "
                 "(this is a temporary behavior).",
@@ -332,9 +357,6 @@ class ThermalLandmarks:
 
         img2d = img.astype(np.float32)
 
-        # sparse detector runs on the 2D frame (temperature or intensity)
-        self.last_sparse_lm = self.face_tracker.detect(img2d)
-
         if mode == "temperature":
             x = np.clip(img2d, 20.0, 40.0)
             denom = x.max() - x.min()
@@ -347,37 +369,35 @@ class ThermalLandmarks:
             x = _to_0_255(img2d)
             image = np.repeat(x[..., None], 3, axis=2).astype(np.float32)
 
-        img_shape = img2d.shape[:2]
-        wp = _warping_depth(self.eta, 100, *img_shape)
+        if sliding_window:
+            candidates = self._sliding_window_candidates(image)
+            if multi:
+                if self.stride > 112:
+                    warnings.warn(
+                        "sliding_window=True with multi=True is suboptimal for stride > 112; "
+                        "reduce the stride for more reliable overlap before NMS.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                kept = self._nms_sliding_candidates(candidates)
+                return (
+                    [candidate["landmarks"] for candidate in kept],
+                    [candidate["uncertainties"] for candidate in kept],
+                )
+            best = min(candidates, key=lambda candidate: candidate["mean_uncertainty"])
+            return best["landmarks"], best["uncertainties"]
+
+        tracker = self._ensure_face_tracker()
+
+        # sparse detector runs on the 2D frame (temperature or intensity)
+        self.last_sparse_lm = tracker.detect(img2d)
 
         if not sliding_window:
             if multi:
                 return self.get_landmarks_multi(image)
             return self.get_landmarks_single(image)
 
-        best_score = np.inf
-        lm = None
-        best_scores = None
-        for i in range(wp, self.max_lvl - 1, -1):
-            lvl_factor = self.eta**i
-            size = (
-                int(round(img_shape[1] * lvl_factor)),
-                int(round(img_shape[0] * lvl_factor)),
-            )
-            img = cv2.resize(image, size)
-            if len(img.shape) == 2:
-                img = np.expand_dims(img, 2)
-            hx = img_shape[1] / size[0]
-            hy = img_shape[0] / size[1]
-            lm_lvl, score, scores = self.get_landmarks(
-                img.astype(np.float32), stride=self.stride
-            )
-            if score < best_score:
-                best_score = score
-                best_scores = scores
-                lm = lm_lvl * np.expand_dims(np.array([hx, hy]), 0)
-
-        return lm, best_scores
+        raise AssertionError("unreachable")
 
     def _refine_landmarks(self, img, lm_scaled):
         x_coords = lm_scaled[:, 0]
@@ -470,9 +490,7 @@ class ThermalLandmarks:
             confidences_all.append(confidences)
         return landmarks, confidences_all
 
-    def get_landmarks(self, img, stride=50, refine=True):
-        """Sliding window implementation for the landmarks"""
-
+    def _sliding_window_level_candidates(self, img, stride=50):
         img_dims = img.shape
         y_pad = 224 - img_dims[0] % 224
         x_pad = 224 - img_dims[1] % 224
@@ -494,29 +512,102 @@ class ThermalLandmarks:
             img_unfold = img_unfold.reshape((s[0] * s[1],) + s[2:])
             lm = self.dmm(self.transform(img_unfold))
 
-            best_scores = lm[..., -1].mean(1)
-            best_score_idx = best_scores.argmin().item()
-            best_score = best_scores[best_score_idx].item()
-            offset = (
-                torch.Tensor(
-                    [
-                        stride * (best_score_idx % s[1]),
-                        stride * (best_score_idx // s[1]),
-                    ]
+            mean_uncertainties = lm[..., -1].mean(1)
+            y_idx = torch.arange(s[0], device=self.device).repeat_interleave(s[1])
+            x_idx = torch.arange(s[1], device=self.device).repeat(s[0])
+            offsets = torch.stack([stride * x_idx, stride * y_idx], dim=1).to(
+                torch.float32
+            )
+            pad_offset = torch.tensor(
+                [x_pad_l, y_pad_l], device=self.device, dtype=torch.float32
+            )
+            lm_out = lm[..., :-1] * 224 + offsets[:, None, :]
+            lm_out = lm_out - pad_offset.view(1, 1, 2)
+            boxes = torch.cat(
+                (
+                    offsets - pad_offset.view(1, 2),
+                    offsets - pad_offset.view(1, 2) + 224,
+                ),
+                dim=1,
+            )
+
+        candidates = []
+        for idx in range(lm.shape[0]):
+            candidates.append(
+                {
+                    "landmarks": lm_out[idx].cpu().detach().numpy(),
+                    "uncertainties": lm[idx, :, -1].cpu().detach().numpy(),
+                    "mean_uncertainty": mean_uncertainties[idx].item(),
+                    "box": boxes[idx].cpu().detach().numpy(),
+                }
+            )
+        return candidates
+
+    def _sliding_window_candidates(self, image):
+        img_shape = image.shape[:2]
+        wp = _warping_depth(self.eta, 100, *img_shape)
+        all_candidates = []
+        scale = np.array([1.0, 1.0], dtype=np.float32)
+
+        for i in range(wp, self.max_lvl - 1, -1):
+            lvl_factor = self.eta**i
+            size = (
+                int(round(img_shape[1] * lvl_factor)),
+                int(round(img_shape[0] * lvl_factor)),
+            )
+            img = cv2.resize(image, size)
+            if len(img.shape) == 2:
+                img = np.expand_dims(img, 2)
+            scale[0] = img_shape[1] / size[0]
+            scale[1] = img_shape[0] / size[1]
+            level_candidates = self._sliding_window_level_candidates(
+                img.astype(np.float32), stride=self.stride
+            )
+            for candidate in level_candidates:
+                landmarks = candidate["landmarks"] * scale
+                box = candidate["box"].copy()
+                box[[0, 2]] *= scale[0]
+                box[[1, 3]] *= scale[1]
+                box[[0, 2]] = np.clip(box[[0, 2]], 0.0, img_shape[1])
+                box[[1, 3]] = np.clip(box[[1, 3]], 0.0, img_shape[0])
+                all_candidates.append(
+                    {
+                        "landmarks": landmarks,
+                        "uncertainties": candidate["uncertainties"],
+                        "mean_uncertainty": candidate["mean_uncertainty"],
+                        "box": box,
+                    }
                 )
-                .unsqueeze(0)
-                .to(self.device)
-            )
-            lm = lm[best_score_idx]
-            lm_out = lm[:, :-1] * 224 + offset
-            lm_out = lm_out - torch.tensor([x_pad_l, y_pad_l]).unsqueeze(0).to(
-                self.device
-            )
 
-        lm_scaled = lm_out.cpu().detach().numpy()
-        confidences = lm[..., -1].cpu().detach().numpy()
+        return all_candidates
 
-        return lm_scaled, best_score, confidences
+    def _nms_sliding_candidates(self, candidates, iou_threshold=0.5):
+        if len(candidates) <= 1:
+            return candidates
+
+        nms = getattr(self, "_torchvision_nms", None)
+        if nms is None:
+            from torchvision.ops import nms
+
+            self._torchvision_nms = nms
+
+        boxes = torch.as_tensor(
+            np.stack([candidate["box"] for candidate in candidates], axis=0),
+            dtype=torch.float32,
+        )
+        scores = torch.as_tensor(
+            [-candidate["mean_uncertainty"] for candidate in candidates],
+            dtype=torch.float32,
+        )
+        keep = self._torchvision_nms(boxes, scores, iou_threshold)
+        keep_idx = keep.cpu().tolist()
+        return [candidates[idx] for idx in keep_idx]
+
+    def get_landmarks(self, img, stride=50, refine=True):
+        """Sliding window implementation for the landmarks"""
+        candidates = self._sliding_window_level_candidates(img, stride=stride)
+        best = min(candidates, key=lambda candidate: candidate["mean_uncertainty"])
+        return best["landmarks"], best["mean_uncertainty"], best["uncertainties"]
 
 
 _file_id_map = {

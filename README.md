@@ -37,7 +37,7 @@ landmarks, confidences = landmarker.process(image)
 
 ## Practical Usage
 
-The ThermalLandmarks wraps a landmarker trained on T-FAKE either with sliding window selecting the face with highest confidence or via a bbox computed with a smaller model.
+The ThermalLandmarks wraps a landmarker trained on T-FAKE either with a tracker-free sliding window selecting the face with lowest uncertainty or via a bbox computed with a smaller model.
 
 Please note that we trained our network with temperature value range of 20°C to 40°C. While our implementation performs an automatic rescaling, please make sure that you adapt our landmarker options based on the input pixel values.
 
@@ -115,7 +115,9 @@ landmarks, confidences = landmarker.process(
 
 - **`sliding_window`** (`bool`, default `False`)
   Enable multi-scale sliding-window inference.
-  **Note:** currently only supported when `multi=False`.
+  This path does not run the YOLO/TFW face tracker.
+  With `multi=True`, overlapping candidates are merged with NMS.
+  **Note:** `stride > 112` is suboptimal for `multi=True`.
 
 ---
 
@@ -127,7 +129,7 @@ landmarks, confidences = landmarker.process(
   - Single `(n_landmarks, 2)` array (sliding window)
 
 - **`confidences`**
-  Per-landmark confidence scores of shape `(n_landmarks,)`
+  Per-landmark uncertainty scores of shape `(n_landmarks,)`
 
 
 # Background

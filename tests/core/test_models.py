@@ -1,4 +1,5 @@
 from pathlib import Path
+import warnings
 
 import numpy as np
 import pytest
@@ -102,11 +103,14 @@ def test_thermal_landmarks_init_loads_model(monkeypatch, tmp_path):
 
 def _make_process_only_landmarker(monkeypatch):
     tl = models.ThermalLandmarks.__new__(models.ThermalLandmarks)
+    tl.device = "cpu"
     tl.img_shape = None
     tl.eta = 0.75
     tl.max_lvl = 0
     tl.stride = 100
+    tl.n_landmarks = 4
     tl.last_sparse_lm = None
+    tl._tracker_init_error = None
 
     class DummyTracker:
         def __init__(self):
@@ -128,6 +132,21 @@ def _make_process_only_landmarker(monkeypatch):
     monkeypatch.setattr(tl, "get_landmarks_multi", capture)
     monkeypatch.setattr(tl, "get_landmarks_single", capture)
     return tl, tracker, captured
+
+
+def _make_bare_landmarker():
+    tl = models.ThermalLandmarks.__new__(models.ThermalLandmarks)
+    tl.device = "cpu"
+    tl.img_shape = None
+    tl.eta = 0.75
+    tl.max_lvl = 0
+    tl.stride = 100
+    tl.n_landmarks = 4
+    tl.last_sparse_lm = None
+    tl.face_tracker = None
+    tl._tracker_init_error = None
+    tl.transform = lambda x: x
+    return tl
 
 
 def test_process_rejects_invalid_mode(monkeypatch):
@@ -252,3 +271,169 @@ def test_process_pixel_mode_does_not_temperature_normalize(monkeypatch):
     out = captured["img3d"]
     expected3d = np.repeat(img[..., None], 3, axis=2).astype(np.float32)
     assert np.array_equal(out, expected3d)
+
+
+def _candidate(landmarks, uncertainties, box):
+    uncertainties = np.asarray(uncertainties, dtype=np.float32)
+    return {
+        "landmarks": np.asarray(landmarks, dtype=np.float32),
+        "uncertainties": uncertainties,
+        "mean_uncertainty": float(np.mean(uncertainties)),
+        "box": np.asarray(box, dtype=np.float32),
+    }
+
+
+def test_process_sliding_window_skips_tracker_and_preserves_cached_sparse(monkeypatch):
+    tl, tracker, _captured = _make_process_only_landmarker(monkeypatch)
+    cached_sparse = [{"landmarks": [1, 2], "box": [3, 4]}]
+    tl.last_sparse_lm = cached_sparse
+    best = _candidate([[5, 6], [7, 8]], [0.1, 0.2], [0, 0, 20, 20])
+    other = _candidate([[1, 1], [2, 2]], [0.4, 0.5], [10, 10, 30, 30])
+    monkeypatch.setattr(tl, "_sliding_window_candidates", lambda _img: [other, best])
+
+    landmarks, uncertainties = tl.process(
+        np.ones((4, 4), dtype=np.float32),
+        sliding_window=True,
+        mode="pixel",
+    )
+
+    assert tracker.last_input is None
+    assert tl.last_sparse_lm is cached_sparse
+    assert np.array_equal(landmarks, best["landmarks"])
+    assert np.array_equal(uncertainties, best["uncertainties"])
+
+
+def test_process_sliding_window_works_without_tracker(monkeypatch):
+    tl = _make_bare_landmarker()
+    expected = _candidate([[1, 2], [3, 4]], [0.1, 0.1], [0, 0, 20, 20])
+    monkeypatch.setattr(
+        tl,
+        "_ensure_face_tracker",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("_ensure_face_tracker should not be called")
+        ),
+    )
+    monkeypatch.setattr(tl, "_sliding_window_candidates", lambda _img: [expected])
+
+    landmarks, uncertainties = tl.process(
+        np.ones((4, 4), dtype=np.float32),
+        sliding_window=True,
+        mode="pixel",
+    )
+
+    assert np.array_equal(landmarks, expected["landmarks"])
+    assert np.array_equal(uncertainties, expected["uncertainties"])
+
+
+def test_process_non_sliding_initializes_tracker_on_demand(monkeypatch):
+    tl = _make_bare_landmarker()
+    captured = {}
+
+    class DummyTracker:
+        def __init__(self, device=None):
+            self.device = device
+            self.last_input = None
+
+        def detect(self, img2d):
+            self.last_input = img2d
+            return [{"landmarks": [], "box": []}]
+
+    def capture(img3d):
+        captured["img3d"] = img3d
+        return "lm", "conf"
+
+    monkeypatch.setattr(tl, "_landmarker_cls", DummyTracker, raising=False)
+    monkeypatch.setattr(tl, "get_landmarks_single", capture)
+
+    img = np.array([[0.0, 100.0], [200.0, 255.0]], dtype=np.float32)
+    out = tl.process(img, mode="pixel")
+
+    assert out == ("lm", "conf")
+    assert isinstance(tl.face_tracker, DummyTracker)
+    assert tl.face_tracker.device == "cpu"
+    assert np.array_equal(tl.face_tracker.last_input, img.astype(np.float32))
+    expected3d = np.repeat(img[..., None], 3, axis=2).astype(np.float32)
+    assert np.array_equal(captured["img3d"], expected3d)
+
+
+def test_process_non_sliding_raises_clear_error_when_tracker_init_fails():
+    tl = _make_bare_landmarker()
+
+    class BrokenTracker:
+        def __init__(self, device=None):
+            raise ModuleNotFoundError("missing tracker")
+
+    tl._landmarker_cls = BrokenTracker
+
+    with pytest.raises(RuntimeError, match="tracker-free path"):
+        tl.process(np.zeros((2, 2), dtype=np.float32), mode="pixel")
+
+
+def test_process_sliding_window_multi_warns_on_large_stride(monkeypatch):
+    tl = _make_bare_landmarker()
+    tl.stride = 113
+    candidates = [
+        _candidate([[9, 9], [10, 10]], [0.2, 0.2], [0, 0, 20, 20]),
+        _candidate([[1, 1], [2, 2]], [0.1, 0.1], [30, 30, 50, 50]),
+    ]
+    expected = [candidates[1], candidates[0]]
+    monkeypatch.setattr(tl, "_sliding_window_candidates", lambda _img: candidates)
+    monkeypatch.setattr(tl, "_nms_sliding_candidates", lambda items: expected)
+
+    with pytest.warns(RuntimeWarning, match="stride > 112"):
+        landmarks, uncertainties = tl.process(
+            np.ones((4, 4), dtype=np.float32),
+            sliding_window=True,
+            multi=True,
+            mode="pixel",
+        )
+
+    assert [lm.tolist() for lm in landmarks] == [
+        c["landmarks"].tolist() for c in expected
+    ]
+    assert [u.tolist() for u in uncertainties] == [
+        c["uncertainties"].tolist() for c in expected
+    ]
+
+
+def test_process_sliding_window_multi_does_not_warn_at_small_stride(monkeypatch):
+    tl = _make_bare_landmarker()
+    tl.stride = 112
+    expected = [_candidate([[1, 1], [2, 2]], [0.1, 0.1], [0, 0, 20, 20])]
+    monkeypatch.setattr(tl, "_sliding_window_candidates", lambda _img: expected)
+    monkeypatch.setattr(tl, "_nms_sliding_candidates", lambda items: items)
+
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        landmarks, uncertainties = tl.process(
+            np.ones((4, 4), dtype=np.float32),
+            sliding_window=True,
+            multi=True,
+            mode="pixel",
+        )
+
+    assert len(record) == 0
+    assert len(landmarks) == 1
+    assert len(uncertainties) == 1
+
+
+def test_nms_sliding_candidates_suppresses_overlaps_and_caches_import():
+    tl = _make_bare_landmarker()
+    candidates = [
+        _candidate([[0, 0], [1, 1]], [0.1, 0.1], [0, 0, 20, 20]),
+        _candidate([[0, 0], [1, 1]], [0.2, 0.2], [1, 1, 21, 21]),
+        _candidate([[5, 5], [6, 6]], [0.3, 0.3], [40, 40, 60, 60]),
+    ]
+
+    kept = tl._nms_sliding_candidates(candidates, iou_threshold=0.5)
+
+    assert hasattr(tl, "_torchvision_nms")
+    assert len(kept) == 2
+    assert kept[0]["mean_uncertainty"] == pytest.approx(0.1)
+    assert kept[1]["mean_uncertainty"] == pytest.approx(0.3)
+
+    cached_nms = tl._torchvision_nms
+    kept_again = tl._nms_sliding_candidates(candidates, iou_threshold=0.5)
+
+    assert tl._torchvision_nms is cached_nms
+    assert [c["mean_uncertainty"] for c in kept_again] == pytest.approx([0.1, 0.3])
