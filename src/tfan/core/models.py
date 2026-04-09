@@ -429,9 +429,7 @@ class ThermalLandmarks:
                         RuntimeWarning,
                         stacklevel=2,
                     )
-                kept = self._nms_sliding_candidates(
-                    candidates, iou_threshold=nms_iou_threshold
-                )
+                kept = self._nms_sliding_candidates(candidates, nms_iou_threshold)
                 kept = self._filter_sliding_candidates(
                     kept,
                     uncertainty_factor=uncertainty_factor,
