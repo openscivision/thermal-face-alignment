@@ -369,6 +369,97 @@ def test_process_non_sliding_raises_clear_error_when_tracker_init_fails():
         tl.process(np.zeros((2, 2), dtype=np.float32), mode="pixel")
 
 
+def test_process_rejects_invalid_upsample_factor(monkeypatch):
+    tl, _tracker, _captured = _make_process_only_landmarker(monkeypatch)
+
+    with pytest.raises(ValueError, match="upsample_factor must be >= 1.0"):
+        tl.process(
+            np.zeros((2, 2), dtype=np.float32), mode="pixel", upsample_factor=0.5
+        )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "pattern"),
+    [
+        ({"nms_iou_threshold": 1.5}, "nms_iou_threshold must be in"),
+        ({"uncertainty_factor": 0.9}, "uncertainty_factor must be >= 1.0"),
+        ({"top_k": 0}, "top_k must be >= 1"),
+    ],
+)
+def test_process_rejects_invalid_sliding_window_threshold_args(
+    monkeypatch, kwargs, pattern
+):
+    tl, _tracker, _captured = _make_process_only_landmarker(monkeypatch)
+
+    with pytest.raises(ValueError, match=pattern):
+        tl.process(np.zeros((2, 2), dtype=np.float32), mode="pixel", **kwargs)
+
+
+def test_process_sliding_window_upsamples_and_rescales(monkeypatch):
+    tl = _make_bare_landmarker()
+    captured = {}
+    expected = _candidate([[30, 60], [90, 120]], [0.1, 0.1], [0, 0, 60, 60])
+
+    def fake_candidates(img):
+        captured["shape"] = img.shape
+        return [expected]
+
+    monkeypatch.setattr(tl, "_sliding_window_candidates", fake_candidates)
+
+    landmarks, uncertainties = tl.process(
+        np.zeros((50, 80), dtype=np.float32),
+        sliding_window=True,
+        mode="pixel",
+        upsample_factor=3.0,
+    )
+
+    assert captured["shape"] == (150, 240, 3)
+    assert np.allclose(landmarks, np.array([[10, 20], [30, 40]], dtype=np.float32))
+    assert np.array_equal(uncertainties, expected["uncertainties"])
+
+
+def test_process_non_sliding_upsamples_and_rescales(monkeypatch):
+    tl = _make_bare_landmarker()
+
+    class DummyTracker:
+        def __init__(self, device=None):
+            self.device = device
+            self.last_input = None
+
+        def detect(self, img2d):
+            self.last_input = img2d
+            return [
+                {
+                    "landmarks": [[30, 60], [90, 120]],
+                    "box": [[0, 0], [60, 90]],
+                }
+            ]
+
+    monkeypatch.setattr(tl, "_landmarker_cls", DummyTracker, raising=False)
+    monkeypatch.setattr(
+        tl,
+        "get_landmarks_single",
+        lambda _img: (
+            [np.array([[30, 60], [90, 120]], dtype=np.float32)],
+            [np.array([0.1, 0.2], dtype=np.float32)],
+        ),
+    )
+
+    landmarks, uncertainties = tl.process(
+        np.zeros((50, 80), dtype=np.float32),
+        mode="pixel",
+        upsample_factor=3.0,
+    )
+
+    assert tl.face_tracker.last_input.shape == (150, 240)
+    assert np.allclose(landmarks[0], np.array([[10, 20], [30, 40]], dtype=np.float32))
+    assert np.array_equal(uncertainties[0], np.array([0.1, 0.2], dtype=np.float32))
+    assert np.allclose(
+        np.asarray(tl.last_sparse_lm[0]["box"], dtype=np.float32),
+        np.array([[0, 0], [20, 30]], dtype=np.float32),
+    )
+
+
 def test_process_sliding_window_multi_warns_on_large_stride(monkeypatch):
     tl = _make_bare_landmarker()
     tl.stride = 113
@@ -437,3 +528,62 @@ def test_nms_sliding_candidates_suppresses_overlaps_and_caches_import():
 
     assert tl._torchvision_nms is cached_nms
     assert [c["mean_uncertainty"] for c in kept_again] == pytest.approx([0.1, 0.3])
+
+
+def test_filter_sliding_candidates_applies_uncertainty_factor_and_top_k():
+    tl = _make_bare_landmarker()
+    candidates = [
+        _candidate([[0, 0], [1, 1]], [0.1, 0.1], [0, 0, 20, 20]),
+        _candidate([[0, 0], [1, 1]], [0.12, 0.12], [30, 30, 50, 50]),
+        _candidate([[0, 0], [1, 1]], [0.2, 0.2], [60, 60, 80, 80]),
+    ]
+
+    kept = tl._filter_sliding_candidates(
+        candidates,
+        uncertainty_factor=1.25,
+        top_k=1,
+    )
+
+    assert len(kept) == 1
+    assert kept[0]["mean_uncertainty"] == pytest.approx(0.1)
+
+
+def test_process_sliding_window_multi_passes_threshold_args(monkeypatch):
+    tl = _make_bare_landmarker()
+    candidates = [
+        _candidate([[1, 1], [2, 2]], [0.1, 0.1], [0, 0, 20, 20]),
+        _candidate([[3, 3], [4, 4]], [0.2, 0.2], [25, 25, 45, 45]),
+    ]
+    captured = {}
+
+    monkeypatch.setattr(tl, "_sliding_window_candidates", lambda _img: candidates)
+
+    def fake_nms(items, iou_threshold):
+        captured["nms_iou_threshold"] = iou_threshold
+        return items
+
+    def fake_filter(items, uncertainty_factor, top_k):
+        captured["uncertainty_factor"] = uncertainty_factor
+        captured["top_k"] = top_k
+        return items[:1]
+
+    monkeypatch.setattr(tl, "_nms_sliding_candidates", fake_nms)
+    monkeypatch.setattr(tl, "_filter_sliding_candidates", fake_filter)
+
+    landmarks, uncertainties = tl.process(
+        np.ones((4, 4), dtype=np.float32),
+        sliding_window=True,
+        multi=True,
+        mode="pixel",
+        nms_iou_threshold=0.4,
+        uncertainty_factor=1.25,
+        top_k=3,
+    )
+
+    assert captured == {
+        "nms_iou_threshold": 0.4,
+        "uncertainty_factor": 1.25,
+        "top_k": 3,
+    }
+    assert len(landmarks) == 1
+    assert len(uncertainties) == 1

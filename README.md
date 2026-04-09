@@ -95,6 +95,10 @@ landmarks, confidences = landmarker.process(
     sliding_window=False,
     multi=False,
     mode="auto",
+    upsample_factor=1.0,
+    nms_iou_threshold=0.5,
+    uncertainty_factor=None,
+    top_k=None,
 )
 ```
 
@@ -118,6 +122,20 @@ landmarks, confidences = landmarker.process(
   This path does not run the YOLO/TFW face tracker.
   With `multi=True`, overlapping candidates are merged with NMS.
   **Note:** `stride > 112` is suboptimal for `multi=True`.
+
+- **`upsample_factor`** (`float`, default `1.0`)
+  Optionally upsample the input before inference. Values larger than `1.0` can help with very
+  small faces. Returned landmarks stay in the original image coordinates.
+
+- **`nms_iou_threshold`** (`float`, default `0.5`)
+  IoU threshold used by sliding-window NMS when `sliding_window=True` and `multi=True`.
+
+- **`uncertainty_factor`** (`float`, optional)
+  Optional post-NMS pruning factor for sliding-window multi-face inference. Keeps detections whose
+  mean uncertainty is at most `best_mean_uncertainty * uncertainty_factor`.
+
+- **`top_k`** (`int`, optional)
+  Optional maximum number of sliding-window detections to keep after NMS and uncertainty filtering.
 
 ---
 

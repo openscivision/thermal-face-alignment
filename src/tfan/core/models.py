@@ -239,7 +239,17 @@ class ThermalLandmarks:
         self._tracker_init_error = None
         return tracker
 
-    def process(self, image, sliding_window=False, multi=False, mode="auto"):
+    def process(
+        self,
+        image,
+        sliding_window=False,
+        multi=False,
+        mode="auto",
+        upsample_factor=1.0,
+        nms_iou_threshold=0.5,
+        uncertainty_factor=None,
+        top_k=None,
+    ):
         """
         Detect faces (sparse) and predict dense landmarks (refined) for an input frame.
 
@@ -266,6 +276,19 @@ class ThermalLandmarks:
             With `multi=True`, overlapping candidates are merged via NMS.
         mode : {"auto", "temperature", "pixel"}, default "auto"
             How to interpret the numeric range of `image`.
+        upsample_factor : float, default 1.0
+            Optional isotropic upsampling applied before inference. Values larger than 1.0 can
+            improve small-face recall, especially for sliding-window inference. Returned landmarks
+            are rescaled back to the original input coordinates.
+        nms_iou_threshold : float, default 0.5
+            IoU threshold used by sliding-window NMS when `sliding_window=True` and `multi=True`.
+        uncertainty_factor : float, optional
+            Optional post-NMS pruning factor for sliding-window multi-face inference. When set,
+            keep only detections with mean uncertainty less than or equal to
+            `best_mean_uncertainty * uncertainty_factor`.
+        top_k : int, optional
+            Optional maximum number of sliding-window detections to keep after NMS and uncertainty
+            filtering. Smaller values reduce clutter in dense scenes.
 
             - "temperature":
                 Interpret a 2D input as temperatures in °C. The detector runs on the original 2D frame.
@@ -303,6 +326,18 @@ class ThermalLandmarks:
             raise ValueError(
                 f"mode must be one of {{'auto','temperature','pixel'}}, got {mode!r}"
             )
+        if upsample_factor < 1.0:
+            raise ValueError(f"upsample_factor must be >= 1.0, got {upsample_factor!r}")
+        if not (0.0 <= nms_iou_threshold <= 1.0):
+            raise ValueError(
+                f"nms_iou_threshold must be in [0.0, 1.0], got {nms_iou_threshold!r}"
+            )
+        if uncertainty_factor is not None and uncertainty_factor < 1.0:
+            raise ValueError(
+                f"uncertainty_factor must be >= 1.0, got {uncertainty_factor!r}"
+            )
+        if top_k is not None and top_k < 1:
+            raise ValueError(f"top_k must be >= 1, got {top_k!r}")
 
         img = np.asarray(image)
 
@@ -356,6 +391,21 @@ class ThermalLandmarks:
             )
 
         img2d = img.astype(np.float32)
+        original_shape = img2d.shape[:2]
+        landmark_scale = np.array([1.0, 1.0], dtype=np.float32)
+        if upsample_factor > 1.0:
+            upsampled_size = (
+                max(1, int(round(original_shape[1] * upsample_factor))),
+                max(1, int(round(original_shape[0] * upsample_factor))),
+            )
+            img2d = cv2.resize(img2d, upsampled_size, interpolation=cv2.INTER_CUBIC)
+            landmark_scale = np.array(
+                [
+                    original_shape[1] / upsampled_size[0],
+                    original_shape[0] / upsampled_size[1],
+                ],
+                dtype=np.float32,
+            )
 
         if mode == "temperature":
             x = np.clip(img2d, 20.0, 40.0)
@@ -379,13 +429,22 @@ class ThermalLandmarks:
                         RuntimeWarning,
                         stacklevel=2,
                     )
-                kept = self._nms_sliding_candidates(candidates)
-                return (
-                    [candidate["landmarks"] for candidate in kept],
-                    [candidate["uncertainties"] for candidate in kept],
+                kept = self._nms_sliding_candidates(
+                    candidates, iou_threshold=nms_iou_threshold
                 )
+                kept = self._filter_sliding_candidates(
+                    kept,
+                    uncertainty_factor=uncertainty_factor,
+                    top_k=top_k,
+                )
+                landmarks = [candidate["landmarks"] for candidate in kept]
+                return self._scale_landmarks_output(landmarks, landmark_scale), [
+                    candidate["uncertainties"] for candidate in kept
+                ]
             best = min(candidates, key=lambda candidate: candidate["mean_uncertainty"])
-            return best["landmarks"], best["uncertainties"]
+            return self._scale_landmarks_output(
+                best["landmarks"], landmark_scale
+            ), best["uncertainties"]
 
         tracker = self._ensure_face_tracker()
 
@@ -394,10 +453,54 @@ class ThermalLandmarks:
 
         if not sliding_window:
             if multi:
-                return self.get_landmarks_multi(image)
-            return self.get_landmarks_single(image)
+                landmarks, confidences = self.get_landmarks_multi(image)
+            else:
+                landmarks, confidences = self.get_landmarks_single(image)
+            self.last_sparse_lm = self._scale_sparse_results(
+                self.last_sparse_lm, landmark_scale
+            )
+            return self._scale_landmarks_output(landmarks, landmark_scale), confidences
 
         raise AssertionError("unreachable")
+
+    def _scale_landmark_array(self, landmarks, scale_xy):
+        scaled = np.array(landmarks, copy=True, dtype=np.float32)
+        if scaled.ndim != 2 or scaled.shape[1] != 2:
+            return scaled
+        valid_x = scaled[:, 0] >= 0
+        valid_y = scaled[:, 1] >= 0
+        scaled[valid_x, 0] *= scale_xy[0]
+        scaled[valid_y, 1] *= scale_xy[1]
+        return scaled
+
+    def _scale_landmarks_output(self, landmarks, scale_xy):
+        if np.allclose(scale_xy, 1.0):
+            return landmarks
+        if isinstance(landmarks, list):
+            return [self._scale_landmark_array(item, scale_xy) for item in landmarks]
+        return self._scale_landmark_array(landmarks, scale_xy)
+
+    def _scale_sparse_results(self, results, scale_xy):
+        if results is None or np.allclose(scale_xy, 1.0):
+            return results
+
+        scaled_results = []
+        for result in results:
+            scaled_result = dict(result)
+            for key in ("landmarks", "box"):
+                points = result.get(key)
+                if points is None:
+                    continue
+                points_array = np.asarray(points)
+                if points_array.size == 0:
+                    continue
+                original_shape = points_array.shape
+                scaled_points = self._scale_landmark_array(
+                    points_array.reshape(-1, 2), scale_xy
+                )
+                scaled_result[key] = scaled_points.reshape(original_shape)
+            scaled_results.append(scaled_result)
+        return scaled_results
 
     def _refine_landmarks(self, img, lm_scaled):
         x_coords = lm_scaled[:, 0]
@@ -602,6 +705,27 @@ class ThermalLandmarks:
         keep = self._torchvision_nms(boxes, scores, iou_threshold)
         keep_idx = keep.cpu().tolist()
         return [candidates[idx] for idx in keep_idx]
+
+    def _filter_sliding_candidates(
+        self, candidates, uncertainty_factor=None, top_k=None
+    ):
+        if len(candidates) <= 1:
+            return candidates[:top_k] if top_k is not None else candidates
+
+        filtered = sorted(
+            candidates, key=lambda candidate: candidate["mean_uncertainty"]
+        )
+        if uncertainty_factor is not None:
+            best_mean_uncertainty = filtered[0]["mean_uncertainty"]
+            threshold = best_mean_uncertainty * uncertainty_factor
+            filtered = [
+                candidate
+                for candidate in filtered
+                if candidate["mean_uncertainty"] <= threshold
+            ]
+        if top_k is not None:
+            filtered = filtered[:top_k]
+        return filtered
 
     def get_landmarks(self, img, stride=50, refine=True):
         """Sliding window implementation for the landmarks"""
