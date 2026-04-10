@@ -469,7 +469,9 @@ def test_process_sliding_window_multi_warns_on_large_stride(monkeypatch):
     ]
     expected = [candidates[1], candidates[0]]
     monkeypatch.setattr(tl, "_sliding_window_candidates", lambda _img: candidates)
-    monkeypatch.setattr(tl, "_nms_sliding_candidates", lambda items: expected)
+    monkeypatch.setattr(
+        tl, "_nms_sliding_candidates", lambda items, _iou_threshold=0.5: expected
+    )
 
     with pytest.warns(RuntimeWarning, match="stride > 112"):
         landmarks, uncertainties = tl.process(
@@ -492,7 +494,9 @@ def test_process_sliding_window_multi_does_not_warn_at_small_stride(monkeypatch)
     tl.stride = 112
     expected = [_candidate([[1, 1], [2, 2]], [0.1, 0.1], [0, 0, 20, 20])]
     monkeypatch.setattr(tl, "_sliding_window_candidates", lambda _img: expected)
-    monkeypatch.setattr(tl, "_nms_sliding_candidates", lambda items: items)
+    monkeypatch.setattr(
+        tl, "_nms_sliding_candidates", lambda items, _iou_threshold=0.5: items
+    )
 
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter("always")
