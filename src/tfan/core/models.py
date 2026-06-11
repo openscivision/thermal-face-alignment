@@ -719,7 +719,6 @@ class ThermalLandmarks:
 _file_id_map = {
     "478": "1DZU3OOACp8gqxCxotZGwe3_gyNJCoY1p",
     "70": "1DqBVVmw9NscDELsnCxB4Pt9ltVUuNoWR",
-    # TODO: replace with the real Google Drive id of the t-fake YOLO detector
-    # (best.onnx) before release; downloads fail until then.
-    "detector_v2": "TODO_DETECTOR_V2_GDRIVE_FILE_ID",
+    # tfake_yolo.onnx — YOLO11 face detector trained on T-FAKE
+    "detector_v2": "1yUMVhy-iCd2wK3fF2ln4LSjOd_LQ_ker",
 }
