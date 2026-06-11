@@ -37,7 +37,10 @@ landmarks, confidences = landmarker.process(image)
 
 ## Practical Usage
 
-The ThermalLandmarks wraps a landmarker trained on T-FAKE either with a tracker-free sliding window selecting the face with lowest uncertainty or via a bbox computed with a smaller model.
+The ThermalLandmarks wraps a landmarker trained on T-FAKE either with a tracker-free sliding window selecting the face with lowest uncertainty or via a bbox computed with a smaller model. The default face detector ("v2") is a YOLO11 network trained on T-FAKE, run via ONNX Runtime and downloaded automatically on first use; the legacy TFW detector remains available via `tracker="tfw"`.
+
+> **Breaking change:** `neurovc` is no longer installed by default. To keep using the legacy TFW
+> tracker, install the extra: `pip install "thermal-face-alignment[tfw]"`.
 
 Please note that we trained our network with temperature value range of 20°C to 40°C. While our implementation performs an automatic rescaling, please make sure that you adapt our landmarker options based on the input pixel values.
 
@@ -53,6 +56,8 @@ ThermalLandmarks(
     stride=100,
     n_landmarks=478, # 478 or 70 point landmarks are supported
     normalize=True,
+    tracker="v2",
+    detector_path=None,
 )
 ```
 
@@ -84,6 +89,27 @@ ThermalLandmarks(
 
 - **`stride`** (`int`, default `100`)
   Pixel stride used during sliding-window scanning.
+
+- **`tracker`** (`str` or detector instance, default `"v2"`)
+  Face detector backend used for the bbox-based (non-sliding-window) path:
+  - `"v2"` — YOLO11 face detector trained on T-FAKE, run via ONNX Runtime (downloaded on first use).
+  - `"tfw"` — legacy TFW detector (requires `pip install "thermal-face-alignment[tfw]"`).
+  - a detector instance with a `detect(frame)` method, e.g. for custom thresholds:
+
+  ```python
+  from tfan import OnnxFaceDetector, ThermalLandmarks
+
+  detector = OnnxFaceDetector(conf_threshold=0.5, iou_threshold=0.45)
+  landmarker = ThermalLandmarks(n_landmarks=70, tracker=detector)
+  ```
+
+  With `tracker="v2"`, the sparse `"landmarks"` entries in `landmarker.last_sparse_lm` are the two
+  bounding-box corners; the 5-point sparse landmarks are only produced by `tracker="tfw"`.
+  For GPU detection install `onnxruntime-gpu`; with the default CPU build, `device="cuda"` warns
+  and runs the detection on CPU (the landmark network still uses CUDA via torch).
+
+- **`detector_path`** (`str` or `Path`, optional)
+  Local path to the v2 detector `.onnx` file, skipping the automatic download (`tracker="v2"` only).
 
 ---
 
@@ -152,7 +178,7 @@ landmarks, confidences = landmarker.process(
 
 # Background
 
-This landmarker is an implementation of our work presented in our [CVPR paper]([https://<paper-url>](https://openaccess.thecvf.com/content/CVPR2025/papers/Flotho_T-FAKE_Synthesizing_Thermal_Images_for_Facial_Landmarking_CVPR_2025_paper.pdf)) on thermal landmarking ([Main GitHub](https://github.com/phflot/tfake)). We employed the [TFW face detector](https://github.com/IS2AI/TFW) for our inital face detection as it performed very well in our benchmark. Please note that this library is meant for research purposes only.
+This landmarker is an implementation of our work presented in our [CVPR paper]([https://<paper-url>](https://openaccess.thecvf.com/content/CVPR2025/papers/Flotho_T-FAKE_Synthesizing_Thermal_Images_for_Facial_Landmarking_CVPR_2025_paper.pdf)) on thermal landmarking ([Main GitHub](https://github.com/phflot/tfake)). The default face detection is a YOLO11 network trained on the T-FAKE dataset. The [TFW face detector](https://github.com/IS2AI/TFW), which we originally employed for our initial face detection as it performed very well in our benchmark, remains available as the legacy `tracker="tfw"` backend. Please note that this library is meant for research purposes only.
 
 ## Landmarker Performance on our Charlotte Benchmark
 ![landmarks](https://raw.githubusercontent.com/openscivision/thermal-face-alignment/7221fdc136ac84f2ce5a304b45b04bdd4bc7405b/img/landmarks.jpg)
@@ -196,7 +222,7 @@ BibTeX entry
 }
 ```
 
-The thermal face bounding box detection in this repo uses the TFW landmarker model, please additionally cite:
+When using the legacy `tracker="tfw"` backend, the thermal face bounding box detection uses the TFW landmarker model, please additionally cite:
 
 > Kuzdeuov, A., Aubakirova, D., Koishigarina, D., & Varol, H. A. (2022). TFW: Annotated Thermal Faces in the Wild Dataset. *IEEE Transactions on Information Forensics and Security*, 17, 2084–2094. https://doi.org/10.1109/TIFS.2022.3177949
 

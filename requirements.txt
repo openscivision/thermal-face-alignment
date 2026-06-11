@@ -1,9 +1,11 @@
 --extra-index-url https://download.pytorch.org/whl/cu118
-neurovc>=0.1.0a3
-yolov5-face==0.0.1a1
 torch>=2.4.0
 torchvision>=0.19.0
 timm
+onnxruntime>=1.19.0
 gdown>=5.2.0
 requests>=2.32.0
 tqdm>=4.0.0
+# legacy "tfw" tracker backend (optional):
+# neurovc>=0.1.0a3
+# yolov5-face==0.0.1a1

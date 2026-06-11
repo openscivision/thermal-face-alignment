@@ -30,16 +30,19 @@ classifiers = [
 ]
 
 dependencies = [
-    "neurovc[landmark]>=0.1.1",
     "torch>=2.4.0",
     "torchvision>=0.19.0",
     "timm>=1.0.0",
+    "onnxruntime>=1.19.0",
     "gdown>=5.2.0",
     "requests>=2.32.0",
     "tqdm>=4.0.0",
 ]
 
 [project.optional-dependencies]
+tfw = [
+    "neurovc[landmark]>=0.1.1",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=5.0.0",

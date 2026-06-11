@@ -1,9 +1,8 @@
-from pathlib import Path
 import warnings
+from pathlib import Path
 
 import numpy as np
 import pytest
-
 from tfan.core import models
 
 
@@ -74,9 +73,7 @@ def test_thermal_landmarks_init_loads_model(monkeypatch, tmp_path):
     calls = {}
 
     monkeypatch.setattr(models, "DMMv2", DummyModel)
-    monkeypatch.setattr(
-        models.ThermalLandmarks, "_landmarker_cls", DummyLandmarker, raising=False
-    )
+    monkeypatch.setattr(models.ThermalLandmarks, "_landmarker_cls", DummyLandmarker, raising=False)
 
     def fake_get_model(model_name):
         calls["model"] = model_name
@@ -309,9 +306,7 @@ def test_process_sliding_window_works_without_tracker(monkeypatch):
     monkeypatch.setattr(
         tl,
         "_ensure_face_tracker",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("_ensure_face_tracker should not be called")
-        ),
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("_ensure_face_tracker should not be called")),
     )
     monkeypatch.setattr(tl, "_sliding_window_candidates", lambda _img: [expected])
 
@@ -373,9 +368,7 @@ def test_process_rejects_invalid_upsample_factor(monkeypatch):
     tl, _tracker, _captured = _make_process_only_landmarker(monkeypatch)
 
     with pytest.raises(ValueError, match="upsample_factor must be >= 1.0"):
-        tl.process(
-            np.zeros((2, 2), dtype=np.float32), mode="pixel", upsample_factor=0.5
-        )
+        tl.process(np.zeros((2, 2), dtype=np.float32), mode="pixel", upsample_factor=0.5)
 
 
 @pytest.mark.parametrize(
@@ -386,9 +379,7 @@ def test_process_rejects_invalid_upsample_factor(monkeypatch):
         ({"top_k": 0}, "top_k must be >= 1"),
     ],
 )
-def test_process_rejects_invalid_sliding_window_threshold_args(
-    monkeypatch, kwargs, pattern
-):
+def test_process_rejects_invalid_sliding_window_threshold_args(monkeypatch, kwargs, pattern):
     tl, _tracker, _captured = _make_process_only_landmarker(monkeypatch)
 
     with pytest.raises(ValueError, match=pattern):
@@ -469,9 +460,7 @@ def test_process_sliding_window_multi_warns_on_large_stride(monkeypatch):
     ]
     expected = [candidates[1], candidates[0]]
     monkeypatch.setattr(tl, "_sliding_window_candidates", lambda _img: candidates)
-    monkeypatch.setattr(
-        tl, "_nms_sliding_candidates", lambda items, _iou_threshold=0.5: expected
-    )
+    monkeypatch.setattr(tl, "_nms_sliding_candidates", lambda items, _iou_threshold=0.5: expected)
 
     with pytest.warns(RuntimeWarning, match="stride > 112"):
         landmarks, uncertainties = tl.process(
@@ -481,12 +470,8 @@ def test_process_sliding_window_multi_warns_on_large_stride(monkeypatch):
             mode="pixel",
         )
 
-    assert [lm.tolist() for lm in landmarks] == [
-        c["landmarks"].tolist() for c in expected
-    ]
-    assert [u.tolist() for u in uncertainties] == [
-        c["uncertainties"].tolist() for c in expected
-    ]
+    assert [lm.tolist() for lm in landmarks] == [c["landmarks"].tolist() for c in expected]
+    assert [u.tolist() for u in uncertainties] == [c["uncertainties"].tolist() for c in expected]
 
 
 def test_process_sliding_window_multi_does_not_warn_at_small_stride(monkeypatch):
@@ -494,9 +479,7 @@ def test_process_sliding_window_multi_does_not_warn_at_small_stride(monkeypatch)
     tl.stride = 112
     expected = [_candidate([[1, 1], [2, 2]], [0.1, 0.1], [0, 0, 20, 20])]
     monkeypatch.setattr(tl, "_sliding_window_candidates", lambda _img: expected)
-    monkeypatch.setattr(
-        tl, "_nms_sliding_candidates", lambda items, _iou_threshold=0.5: items
-    )
+    monkeypatch.setattr(tl, "_nms_sliding_candidates", lambda items, _iou_threshold=0.5: items)
 
     with warnings.catch_warnings(record=True) as record:
         warnings.simplefilter("always")
@@ -591,3 +574,197 @@ def test_process_sliding_window_multi_passes_threshold_args(monkeypatch):
     }
     assert len(landmarks) == 1
     assert len(uncertainties) == 1
+
+
+def _patch_init_stubs(monkeypatch, tmp_path):
+    class DummyModel:
+        def __init__(self, n_landmarks, use_depth=False):
+            self.n_landmarks = n_landmarks
+
+        def load_state_dict(self, state, strict=False):
+            pass
+
+        def eval(self):
+            return self
+
+        def to(self, device):
+            return self
+
+    model_path = tmp_path / "dummy.pt"
+    model_path.write_bytes(b"stub")
+
+    monkeypatch.setattr(models, "DMMv2", DummyModel)
+    monkeypatch.setattr(models, "_get_model", lambda _name: model_path)
+    monkeypatch.setattr(models.torch, "load", lambda path, weights_only=False: {"state": "ok"})
+
+
+def test_init_tracker_v2_default_does_not_download(monkeypatch, tmp_path):
+    _patch_init_stubs(monkeypatch, tmp_path)
+
+    def fail_download(*args, **kwargs):
+        raise AssertionError("gdown should not be called during construction")
+
+    monkeypatch.setattr(models.gdown, "download", fail_download)
+
+    tl = models.ThermalLandmarks(device="cpu", n_landmarks=70)
+
+    from tfan.core.detector import OnnxFaceDetector
+
+    assert tl.tracker == "v2"
+    assert isinstance(tl.face_tracker, OnnxFaceDetector)
+    assert tl.face_tracker.session is None
+
+
+def test_init_tracker_instance_injection(monkeypatch, tmp_path):
+    _patch_init_stubs(monkeypatch, tmp_path)
+
+    class CustomTracker:
+        def detect(self, img2d):
+            return []
+
+    custom = CustomTracker()
+    tl = models.ThermalLandmarks(device="cpu", n_landmarks=70, tracker=custom)
+
+    assert tl.face_tracker is custom
+    assert tl._ensure_face_tracker() is custom
+
+
+@pytest.mark.parametrize("bad_tracker", ["v3", object()])
+def test_init_rejects_invalid_tracker(bad_tracker):
+    with pytest.raises(ValueError, match="tracker must be"):
+        models.ThermalLandmarks(device="cpu", tracker=bad_tracker)
+
+
+def test_landmarker_cls_override_beats_v2_default(monkeypatch):
+    tl = _make_bare_landmarker()
+    tl.tracker = "v2"
+
+    class DummyTracker:
+        def __init__(self, device=None):
+            self.device = device
+
+        def detect(self, img2d):
+            return []
+
+    monkeypatch.setattr(tl, "_landmarker_cls", DummyTracker, raising=False)
+
+    tracker = tl._ensure_face_tracker()
+
+    assert isinstance(tracker, DummyTracker)
+    assert tracker.device == "cpu"
+
+
+def test_ensure_face_tracker_v2_branch_passes_detector_path(monkeypatch):
+    tl = _make_bare_landmarker()
+    tl.tracker = "v2"
+    tl._detector_path = "/tmp/custom.onnx"
+
+    captured = {}
+
+    class DummyDetector:
+        def __init__(self, model_path=None, device=None):
+            captured["model_path"] = model_path
+            captured["device"] = device
+
+        def detect(self, img2d):
+            return []
+
+    import tfan.core.detector as detector_module
+
+    monkeypatch.setattr(detector_module, "OnnxFaceDetector", DummyDetector)
+
+    tracker = tl._ensure_face_tracker()
+
+    assert isinstance(tracker, DummyDetector)
+    assert captured == {"model_path": "/tmp/custom.onnx", "device": "cpu"}
+
+
+def test_ensure_face_tracker_tfw_branch(monkeypatch):
+    import types
+
+    tl = _make_bare_landmarker()
+    tl.tracker = "tfw"
+
+    class DummyTFW:
+        def __init__(self, device=None):
+            self.device = device
+
+        def detect(self, img2d):
+            return []
+
+    fake_pkg = types.ModuleType("neurovc")
+    fake_mod = types.ModuleType("neurovc.thermal_landmarks")
+    fake_mod.TFWLandmarker = DummyTFW
+    fake_pkg.thermal_landmarks = fake_mod
+    monkeypatch.setitem(__import__("sys").modules, "neurovc", fake_pkg)
+    monkeypatch.setitem(__import__("sys").modules, "neurovc.thermal_landmarks", fake_mod)
+
+    tracker = tl._ensure_face_tracker()
+
+    assert isinstance(tracker, DummyTFW)
+    assert tracker.device == "cpu"
+
+
+def test_tracker_init_failure_names_backend(monkeypatch):
+    tl = _make_bare_landmarker()
+    tl.tracker = "v2"
+
+    class BrokenDetector:
+        def __init__(self, model_path=None, device=None):
+            raise ModuleNotFoundError("missing onnxruntime")
+
+        def detect(self, img2d):
+            return []
+
+    import tfan.core.detector as detector_module
+
+    monkeypatch.setattr(detector_module, "OnnxFaceDetector", BrokenDetector)
+
+    with pytest.raises(RuntimeError, match="tracker-free path"):
+        tl.process(np.zeros((2, 2), dtype=np.float32), mode="pixel")
+    assert isinstance(tl._tracker_init_error, ModuleNotFoundError)
+
+
+def test_process_with_v2_style_results_upsampled(monkeypatch):
+    tl = _make_bare_landmarker()
+
+    corners = np.array([[3.0, 3.0], [9.0, 9.0]], dtype=np.float32)
+
+    class V2StyleTracker:
+        def __init__(self):
+            self.last_input = None
+
+        def detect(self, img2d):
+            self.last_input = img2d
+            return [
+                {
+                    "landmarks": corners.copy(),
+                    "box": corners.copy(),
+                    "confidence": 0.9,
+                }
+            ]
+
+    tl.face_tracker = V2StyleTracker()
+
+    captured = {}
+
+    def fake_refine(img, lm_scaled):
+        captured["bbox"] = np.array(lm_scaled, copy=True)
+        return np.array([[6.0, 6.0]], dtype=np.float32), np.array([0.5])
+
+    monkeypatch.setattr(tl, "_refine_landmarks", fake_refine)
+
+    img = np.zeros((4, 4), dtype=np.float32)
+    landmarks, confidences = tl.process(img, mode="pixel", upsample_factor=3.0)
+
+    # detector saw the upsampled frame, refinement got the upsampled box
+    assert tl.face_tracker.last_input.shape == (12, 12)
+    np.testing.assert_allclose(captured["bbox"], corners)
+
+    # outputs and cached sparse results are rescaled to the original frame
+    np.testing.assert_allclose(landmarks[0], [[2.0, 2.0]])
+    np.testing.assert_allclose(confidences[0], [0.5])
+    cached = tl.last_sparse_lm[0]
+    np.testing.assert_allclose(cached["box"], [[1.0, 1.0], [3.0, 3.0]])
+    np.testing.assert_allclose(cached["landmarks"], [[1.0, 1.0], [3.0, 3.0]])
+    assert cached["confidence"] == 0.9

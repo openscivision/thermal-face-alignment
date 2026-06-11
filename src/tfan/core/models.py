@@ -2,20 +2,18 @@
 # Author: Philipp Flotho (philipp.flotho[at]uni-saarland.de)
 # ------------------------------------------------------------------------------------
 
+import os
+import warnings
+from os.path import join
+from pathlib import Path
+
+import cv2
+import gdown
+import numpy as np
 import timm
 import torch
 import torch.nn as nn
-import cv2
 from torchvision.transforms import Normalize
-import warnings
-
-import numpy as np
-
-from os.path import join
-
-import gdown
-import os
-from pathlib import Path
 
 MOBILENET = "mobilenetv2_100"
 RESNET = "resnet101"
@@ -24,18 +22,14 @@ DEVICE = "cuda"
 
 
 class _ModelDownloader:
-    def __init__(self, model_name, save_dir="~/.tfan/models"):
+    def __init__(self, model_name, save_dir="~/.tfan/models", suffix=".pt"):
         self.model_name = model_name
         self.save_dir = Path(os.path.expanduser(save_dir))
         self.file_id = _file_id_map.get(model_name)
         if not self.file_id:
-            raise ValueError(
-                f"Model name '{model_name}' is not valid. Check the file_id_map."
-            )
-        self.model_url = (
-            f"https://drive.google.com/uc?export=download&id={self.file_id}"
-        )
-        self.model_path = self.save_dir / f"{model_name}.pt"
+            raise ValueError(f"Model name '{model_name}' is not valid. Check the file_id_map.")
+        self.model_url = f"https://drive.google.com/uc?export=download&id={self.file_id}"
+        self.model_path = self.save_dir / f"{model_name}{suffix}"
 
     def download_model(self):
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -55,9 +49,7 @@ def _get_model(model_name="478"):
     downloader = _ModelDownloader(model_name)
     weights_path = downloader.download_model()
     model_path_final_joint = join(os.path.dirname(weights_path), "joint_converted.pt")
-    convert_model(
-        weights_path, model_path_final_joint, n_landmarks=int(model_name), mode="JOINT"
-    )
+    convert_model(weights_path, model_path_final_joint, n_landmarks=int(model_name), mode="JOINT")
     return model_path_final_joint
 
 
@@ -100,9 +92,7 @@ class DMMv2(nn.Module):
     def __init__(self, n_landmarks, use_depth=False):
         super().__init__()
         self.use_depth = False
-        self.feature_network = timm.create_model(
-            "mobilenetv2_100", pretrained=True, num_classes=0
-        )
+        self.feature_network = timm.create_model("mobilenetv2_100", pretrained=True, num_classes=0)
         self.feature_network.classifier.requires_grad = False
 
         self.n_landmarks = n_landmarks
@@ -128,7 +118,9 @@ class ThermalLandmarks:
     Dense face landmark refinement for thermal (and optionally intensity/RGB) inputs.
 
     This class wraps a two-stage pipeline:
-      1) A sparse face detector/tracker (`TFWLandmarker`) produces a face box (and/or sparse landmarks).
+      1) A face detector produces a face box (and/or sparse landmarks). The default ("v2") is a
+         YOLO11 detector trained on T-FAKE, run via ONNX Runtime; the legacy "tfw" backend
+         (`TFWLandmarker` from neurovc) remains available.
       2) A lightweight regression network (`DMMv2`, MobileNetV2 backbone) refines to `n_landmarks`
          dense 2D landmarks plus a per-landmark uncertainty.
 
@@ -156,11 +148,20 @@ class ThermalLandmarks:
         If True, apply ImageNet normalization to crops before inference. By default, the
         normalization assumes crops are in the 0–255 range (internally divided by 255).
         If you standardize inputs to 0–1 earlier, adjust the normalization accordingly.
+    tracker : str or object, default "v2"
+        Face detector backend: "v2" (T-FAKE YOLO via ONNX Runtime, requires onnxruntime),
+        "tfw" (legacy `TFWLandmarker`, requires `pip install "thermal-face-alignment[tfw]"`),
+        or an object exposing `detect(img2d)` (e.g. an `OnnxFaceDetector` instance with
+        custom thresholds). For "v2", sparse "landmarks" in the results are the two box
+        corners; the 5-point sparse landmarks are only available with "tfw".
+    detector_path : str or pathlib.Path, optional
+        Local path to the v2 detector `.onnx` file. If omitted, the detector is downloaded
+        on first use (tracker="v2" only).
 
     Attributes
     ----------
     face_tracker : object
-        Instance of the sparse detector/tracker (defaults to `TFWLandmarker`).
+        Instance of the face detector backend (defaults to `OnnxFaceDetector`).
         Created eagerly when available and lazily retried on demand otherwise.
     dmm : torch.nn.Module
         Landmark refinement network (`DMMv2`), possibly wrapped in `nn.DataParallel`.
@@ -184,10 +185,21 @@ class ThermalLandmarks:
         stride=100,
         n_landmarks=478,
         normalize=True,
+        tracker="v2",
+        detector_path=None,
     ):
         self.device = device
         self.n_landmarks = n_landmarks
-        self.face_tracker = None
+        if isinstance(tracker, str):
+            if tracker not in ("v2", "tfw"):
+                raise ValueError("tracker must be 'v2', 'tfw', or an object with a detect() " f"method, got {tracker!r}")
+            self.face_tracker = None
+        elif hasattr(tracker, "detect"):
+            self.face_tracker = tracker
+        else:
+            raise ValueError("tracker must be 'v2', 'tfw', or an object with a detect() " f"method, got {tracker!r}")
+        self.tracker = tracker
+        self._detector_path = detector_path
         self._tracker_init_error = None
         self._ensure_face_tracker(raise_on_error=False)
 
@@ -222,15 +234,30 @@ class ThermalLandmarks:
             return tracker
 
         landmarker_cls = getattr(self, "_landmarker_cls", None)
+        backend = getattr(self, "tracker", "v2")
         try:
-            if landmarker_cls is None:
-                from neurovc.thermal_landmarks import TFWLandmarker as landmarker_cls
-            tracker = landmarker_cls(device=self.device)
+            if landmarker_cls is not None:
+                tracker = landmarker_cls(device=self.device)
+            elif not isinstance(backend, str):
+                tracker = backend
+            elif backend == "tfw":
+                from neurovc.thermal_landmarks import TFWLandmarker
+
+                tracker = TFWLandmarker(device=self.device)
+            else:
+                from tfan.core.detector import OnnxFaceDetector
+
+                tracker = OnnxFaceDetector(
+                    model_path=getattr(self, "_detector_path", None),
+                    device=self.device,
+                )
         except Exception as exc:
             self._tracker_init_error = exc
             if raise_on_error:
                 raise RuntimeError(
-                    "Tracker-backed inference requires TFWLandmarker; "
+                    f"Face tracker initialization failed (tracker={backend!r}): "
+                    "tracker='v2' requires onnxruntime, tracker='tfw' requires "
+                    "neurovc (pip install 'thermal-face-alignment[tfw]'); "
                     "use process(..., sliding_window=True) for the tracker-free path."
                 ) from exc
             return None
@@ -323,19 +350,13 @@ class ThermalLandmarks:
             or if inference cannot proceed (e.g. missing cached detections for 3D inputs).
         """
         if mode not in {"auto", "temperature", "pixel"}:
-            raise ValueError(
-                f"mode must be one of {{'auto','temperature','pixel'}}, got {mode!r}"
-            )
+            raise ValueError(f"mode must be one of {{'auto','temperature','pixel'}}, got {mode!r}")
         if upsample_factor < 1.0:
             raise ValueError(f"upsample_factor must be >= 1.0, got {upsample_factor!r}")
         if not (0.0 <= nms_iou_threshold <= 1.0):
-            raise ValueError(
-                f"nms_iou_threshold must be in [0.0, 1.0], got {nms_iou_threshold!r}"
-            )
+            raise ValueError(f"nms_iou_threshold must be in [0.0, 1.0], got {nms_iou_threshold!r}")
         if uncertainty_factor is not None and uncertainty_factor < 1.0:
-            raise ValueError(
-                f"uncertainty_factor must be >= 1.0, got {uncertainty_factor!r}"
-            )
+            raise ValueError(f"uncertainty_factor must be >= 1.0, got {uncertainty_factor!r}")
         if top_k is not None and top_k < 1:
             raise ValueError(f"top_k must be >= 1, got {top_k!r}")
 
@@ -361,8 +382,7 @@ class ThermalLandmarks:
 
         if img.ndim == 3 and img.shape[2] == 3:
             warnings.warn(
-                "process(): got a 3-channel image; interpreting it as thermal by averaging channels "
-                "(this is a temporary behavior).",
+                "process(): got a 3-channel image; interpreting it as thermal by averaging channels " "(this is a temporary behavior).",
                 RuntimeWarning,
                 stacklevel=2,
             )
@@ -381,14 +401,10 @@ class ThermalLandmarks:
                     else:
                         mode = "pixel"
             else:
-                raise ValueError(
-                    f"Expected 2D thermal frame after preprocessing, got shape {img.shape!r}"
-                )
+                raise ValueError(f"Expected 2D thermal frame after preprocessing, got shape {img.shape!r}")
 
         if img.ndim != 2:
-            raise ValueError(
-                f"Expected 2D thermal frame after preprocessing, got shape {img.shape!r}"
-            )
+            raise ValueError(f"Expected 2D thermal frame after preprocessing, got shape {img.shape!r}")
 
         img2d = img.astype(np.float32)
         original_shape = img2d.shape[:2]
@@ -436,13 +452,9 @@ class ThermalLandmarks:
                     top_k=top_k,
                 )
                 landmarks = [candidate["landmarks"] for candidate in kept]
-                return self._scale_landmarks_output(landmarks, landmark_scale), [
-                    candidate["uncertainties"] for candidate in kept
-                ]
+                return self._scale_landmarks_output(landmarks, landmark_scale), [candidate["uncertainties"] for candidate in kept]
             best = min(candidates, key=lambda candidate: candidate["mean_uncertainty"])
-            return self._scale_landmarks_output(
-                best["landmarks"], landmark_scale
-            ), best["uncertainties"]
+            return self._scale_landmarks_output(best["landmarks"], landmark_scale), best["uncertainties"]
 
         tracker = self._ensure_face_tracker()
 
@@ -454,9 +466,7 @@ class ThermalLandmarks:
                 landmarks, confidences = self.get_landmarks_multi(image)
             else:
                 landmarks, confidences = self.get_landmarks_single(image)
-            self.last_sparse_lm = self._scale_sparse_results(
-                self.last_sparse_lm, landmark_scale
-            )
+            self.last_sparse_lm = self._scale_sparse_results(self.last_sparse_lm, landmark_scale)
             return self._scale_landmarks_output(landmarks, landmark_scale), confidences
 
         raise AssertionError("unreachable")
@@ -493,9 +503,7 @@ class ThermalLandmarks:
                 if points_array.size == 0:
                     continue
                 original_shape = points_array.shape
-                scaled_points = self._scale_landmark_array(
-                    points_array.reshape(-1, 2), scale_xy
-                )
+                scaled_points = self._scale_landmark_array(points_array.reshape(-1, 2), scale_xy)
                 scaled_result[key] = scaled_points.reshape(original_shape)
             scaled_results.append(scaled_result)
         return scaled_results
@@ -533,21 +541,13 @@ class ThermalLandmarks:
         patch = padded_img[y_start:y_end, x_start:x_end]
 
         x = cv2.resize(patch, (224, 224))
-        x = (
-            torch.from_numpy(x)
-            .to(torch.float32)
-            .to(self.device)
-            .permute(2, 0, 1)
-            .unsqueeze(0)
-        )
+        x = torch.from_numpy(x).to(torch.float32).to(self.device).permute(2, 0, 1).unsqueeze(0)
 
         with torch.no_grad():
             cropped_transformed = self.transform(x)
             refined_lm = self.dmm(cropped_transformed)
 
-        refined_lm_scaled = (
-            (refined_lm[..., :-1] * largest_side).cpu().detach().squeeze().numpy()
-        )
+        refined_lm_scaled = (refined_lm[..., :-1] * largest_side).cpu().detach().squeeze().numpy()
         refined_lm_scaled += np.array([[x_start - padding, y_start - padding]])
         confidences = refined_lm[..., -1].cpu().detach().squeeze().numpy()
         return refined_lm_scaled, confidences
@@ -605,9 +605,7 @@ class ThermalLandmarks:
         pad = (0, 0, x_pad_l, x_pad_r, y_pad_l, y_pad_r)
 
         with torch.no_grad():
-            x = torch.nn.functional.pad(
-                torch.from_numpy(img).to(torch.float32), pad
-            ).to(self.device)
+            x = torch.nn.functional.pad(torch.from_numpy(img).to(torch.float32), pad).to(self.device)
             img_unfold = x.unfold(0, 224, stride).unfold(1, 224, stride)
             s = img_unfold.shape
             img_unfold = img_unfold.reshape((s[0] * s[1],) + s[2:])
@@ -616,12 +614,8 @@ class ThermalLandmarks:
             mean_uncertainties = lm[..., -1].mean(1)
             y_idx = torch.arange(s[0], device=self.device).repeat_interleave(s[1])
             x_idx = torch.arange(s[1], device=self.device).repeat(s[0])
-            offsets = torch.stack([stride * x_idx, stride * y_idx], dim=1).to(
-                torch.float32
-            )
-            pad_offset = torch.tensor(
-                [x_pad_l, y_pad_l], device=self.device, dtype=torch.float32
-            )
+            offsets = torch.stack([stride * x_idx, stride * y_idx], dim=1).to(torch.float32)
+            pad_offset = torch.tensor([x_pad_l, y_pad_l], device=self.device, dtype=torch.float32)
             lm_out = lm[..., :-1] * 224 + offsets[:, None, :]
             lm_out = lm_out - pad_offset.view(1, 1, 2)
             boxes = torch.cat(
@@ -661,9 +655,7 @@ class ThermalLandmarks:
                 img = np.expand_dims(img, 2)
             scale[0] = img_shape[1] / size[0]
             scale[1] = img_shape[0] / size[1]
-            level_candidates = self._sliding_window_level_candidates(
-                img.astype(np.float32), stride=self.stride
-            )
+            level_candidates = self._sliding_window_level_candidates(img.astype(np.float32), stride=self.stride)
             for candidate in level_candidates:
                 landmarks = candidate["landmarks"] * scale
                 box = candidate["box"].copy()
@@ -704,23 +696,15 @@ class ThermalLandmarks:
         keep_idx = keep.cpu().tolist()
         return [candidates[idx] for idx in keep_idx]
 
-    def _filter_sliding_candidates(
-        self, candidates, uncertainty_factor=None, top_k=None
-    ):
+    def _filter_sliding_candidates(self, candidates, uncertainty_factor=None, top_k=None):
         if len(candidates) <= 1:
             return candidates[:top_k] if top_k is not None else candidates
 
-        filtered = sorted(
-            candidates, key=lambda candidate: candidate["mean_uncertainty"]
-        )
+        filtered = sorted(candidates, key=lambda candidate: candidate["mean_uncertainty"])
         if uncertainty_factor is not None:
             best_mean_uncertainty = filtered[0]["mean_uncertainty"]
             threshold = best_mean_uncertainty * uncertainty_factor
-            filtered = [
-                candidate
-                for candidate in filtered
-                if candidate["mean_uncertainty"] <= threshold
-            ]
+            filtered = [candidate for candidate in filtered if candidate["mean_uncertainty"] <= threshold]
         if top_k is not None:
             filtered = filtered[:top_k]
         return filtered
@@ -735,4 +719,7 @@ class ThermalLandmarks:
 _file_id_map = {
     "478": "1DZU3OOACp8gqxCxotZGwe3_gyNJCoY1p",
     "70": "1DqBVVmw9NscDELsnCxB4Pt9ltVUuNoWR",
+    # TODO: replace with the real Google Drive id of the t-fake YOLO detector
+    # (best.onnx) before release; downloads fail until then.
+    "detector_v2": "TODO_DETECTOR_V2_GDRIVE_FILE_ID",
 }
